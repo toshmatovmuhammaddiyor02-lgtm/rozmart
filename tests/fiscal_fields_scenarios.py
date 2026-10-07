@@ -23,6 +23,9 @@ os.environ.update({
     "DATABASE_URL": f"sqlite:///{tmp.as_posix()}",
     "BOT_TOKEN": "111:shop-token",
     "ADMIN_TELEGRAM_IDS": "1",
+    "REGOS_KEY": "test-key",
+    "REGOS_STOCK_ID": "5",
+    "REGOS_PRICE_TYPE_ID": "5",
 })
 
 from fastapi.testclient import TestClient  # noqa: E402
@@ -33,6 +36,21 @@ from app.main import app  # noqa: E402
 from app.models import AdminUser, Category, Product, Variant  # noqa: E402
 from app.regos.catalog_sync import apply_fiscal  # noqa: E402
 
+# REGOS: знает коды только позиции 515 (вода из «Новых из REGOS»), кода упаковки нет
+regos_calls = []
+
+
+class FakeRegos:
+    def call(self, method, params=None, **kw):
+        regos_calls.append(method)
+        codes = next(f["Value"] for f in params["filters"] if f["Field"] == "code").split(",")
+        return [{"item": {"code": 515, "icps": "02201002001001001", "package_code": None,
+                          "vat": {"value": 12.0, "enabled": True}}}] if "515" in codes else []
+
+
+import app.regos.client as regos_client  # noqa: E402
+regos_client.RegosClient = FakeRegos
+
 init_db()
 db = SessionLocal()
 cat = Category(name="Деликатесы"); db.add(cat); db.flush()
@@ -40,10 +58,14 @@ prod = Product(category_id=cat.id, name="Куриный казы", is_active=Tru
 variant = Variant(product_id=prod.id, external_code="004866", weight="400 г", price=43990,
                   regos_price=43990, is_active=True)
 db.add(variant)
+water = Product(category_id=cat.id, name="VODA BONAQUA S GAZOM 1.5L", is_active=False)
+db.add(water); db.flush()
+db.add(Variant(product_id=water.id, external_code="000515", weight="1.5L", price=7000,
+               regos_price=7000, is_active=True))
 for name, role in (("tov", "manager"), ("buh", "accountant")):
     db.add(AdminUser(username=name, role=role, password_hash=admin_auth.hash_password("pass-12345")))
 db.commit()
-vid, pid = variant.id, prod.id
+vid, pid, water_id = variant.id, prod.id, water.id
 db.close()
 
 results = []
@@ -110,6 +132,14 @@ buh = TestClient(app, base_url="https://testserver")
 buh.post("/api/admin/login", json={"username": "buh", "password": "pass-12345"})
 check(6, "Бухгалтеру карточки товаров недоступны",
       put({"mxik": "", "package_code": ""}, headers={}, c=buh).status_code == 403)
+
+w = client.get(f"/api/admin/products/{water_id}", headers=ADMIN).json()["variants"][0]
+check(7, "Карточка из «Новых из REGOS»: ИКПУ и НДС подтянулись из REGOS при открытии",
+      w["mxik"] == "02201002001001001" and w["vat_percent"] == 12, w)
+check(7, "Кода упаковки в REGOS нет — поле пустое, его вписывают вручную", w["package_code"] is None)
+before = len(regos_calls)
+client.get(f"/api/admin/products/{water_id}", headers=ADMIN)
+check(7, "Повторное открытие не дёргает REGOS снова", len(regos_calls) == before)
 
 failed = [r for r in results if not r[2]]
 print(f"\nИтого проверок: {len(results)}, не прошло: {len(failed)}")

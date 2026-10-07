@@ -310,6 +310,41 @@ def products_count(db: Session = Depends(get_db), _: TelegramUser = Depends(requ
     return {"total": total, "published": published, "hidden": total - published}
 
 
+# когда последний раз спрашивали REGOS о кодах фасовки: id -> time.time()
+_fiscal_asked: dict[int, float] = {}
+FISCAL_ASK_EVERY = 600
+
+
+def refresh_fiscal(db: Session, variants) -> None:
+    """Недостающие ИКПУ, код упаковки и НДС — из REGOS, при открытии карточки.
+
+    Синхронизация берёт коды только у выбранных групп и у витрины, а карточку
+    открывают и до публикации — из «Новых из REGOS». Спрашиваем одним запросом
+    по кодам фасовок и не чаще раза в FISCAL_ASK_EVERY: кода упаковки в REGOS
+    часто нет вовсе, и дёргать REGOS при каждом открытии незачем.
+    REGOS недоступен — карточка открывается как есть.
+    """
+    import time
+
+    from app.regos import catalog_sync, config as regos_config, prices
+    from app.regos.client import RegosClient
+
+    now = time.time()
+    missing = [v for v in variants
+               if (not v.mxik or not v.package_code or v.vat_percent is None)
+               and now - _fiscal_asked.get(v.id, 0) > FISCAL_ASK_EVERY]
+    if not missing or not regos_config.is_configured():
+        return
+    for v in missing:
+        _fiscal_asked[v.id] = now
+    try:
+        catalog_sync.fill_fiscal(db, RegosClient(), missing, prices.current(db))
+        db.commit()
+    except Exception as exc:                # noqa: BLE001
+        db.rollback()
+        log.warning("Коды для чека из REGOS не получены: %s", exc)
+
+
 @router.get("/products/{product_id}", response_model=ProductDetail)
 def get_product(
     product_id: int,
@@ -319,6 +354,7 @@ def get_product(
     product = db.get(Product, product_id)
     if product is None:
         raise HTTPException(status_code=404, detail="Товар не найден")
+    refresh_fiscal(db, product.variants)
     base = _row(product).model_dump()
     return ProductDetail(
         **base,
