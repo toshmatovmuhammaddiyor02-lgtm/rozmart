@@ -300,7 +300,8 @@ def order_invoice(
     окно — не повод оформлять заказ повторно.
 
     kind подсказывает приложению, как открыть ссылку: `telegram` — окном
-    оплаты Telegram, `payme` — страницей Payme, `paynet` — что ввести в Paynet.
+    оплаты Telegram, `payme` — страницей Payme, `click` — страницей Click,
+    `paynet` — что ввести в Paynet.
 
     provider — другой способ, чем выбранный при оформлении: не вышло через
     Payme — можно через Paynet. Выбор запоминается у заказа.
@@ -336,6 +337,9 @@ def order_invoice(
                                                amount=order.total)
                 if payments.PAYNET_PAY_URL else None)
         return {"kind": "paynet", "link": link, "order": digits, "amount": order.total}
+    if chosen == "click":
+        from app import click
+        return {"link": click.pay_url(order), "kind": "click"}
     if chosen == "payme":
         from app import payme
         from app import i18n

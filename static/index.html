@@ -163,12 +163,13 @@ body.tabs-on .ft{bottom:calc(var(--tabs) + var(--safe-bot));padding-bottom:12px}
   justify-content:center;gap:8px}
 .line{display:flex;gap:11px;align-items:center}
 .del{color:#B0B0B0;font-size:19px;padding:6px;margin:-6px}
-/* онлайн-оплата: плитки Payme и Paynet под пунктом «Онлайн оплата» */
-.ptiles{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:2px 0 10px}
+/* онлайн-оплата: плитки Payme, Click и Paynet под пунктом «Онлайн оплата» */
+.ptiles{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:2px 0 10px}
 .ptile{position:relative;background:#fff;border:1.5px solid #E8E8E8;border-radius:14px;
   padding:22px 8px 10px;text-align:center;cursor:pointer}
 .ptile.on{border-color:#E30613;box-shadow:0 0 0 3px rgba(227,6,19,.10)}
 .ptile.soon{opacity:.5}
+.ptile .lg{font-size:19px}
 .ptile-name{font-size:12px;color:#8A8A8A;margin-top:4px}
 .soon-badge{position:absolute;top:5px;right:6px;background:#F2F2F2;color:#6B6B6B;
   font-size:10.5px;border-radius:8px;padding:2px 7px}
@@ -180,6 +181,10 @@ body.tabs-on .ft{bottom:calc(var(--tabs) + var(--safe-bot));padding-bottom:12px}
 .lg-paynet{color:#141414;font-weight:700;letter-spacing:-.6px}
 .lg-paynet::before{content:"";display:inline-block;width:.62em;height:.62em;border-radius:50%;
   background:#1ED760;margin-right:.12em;vertical-align:-.02em}
+/* Click: синий круг с белой точкой и синее жирное «click» строчными */
+.lg-click{color:#0D8FEF;font-weight:700;letter-spacing:-.4px}
+.lg-click::before{content:"";display:inline-block;width:.62em;height:.62em;border-radius:50%;
+  background:#fff;border:.2em solid #0D8FEF;box-sizing:border-box;margin-right:.14em;vertical-align:-.04em}
 /* переключатель языка в профиле */
 .langs{display:flex;gap:8px;margin-bottom:12px}
 .langs button{flex:1;padding:10px;border-radius:12px;border:1px solid #E5E5E5;background:#fff;

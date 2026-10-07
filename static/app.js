@@ -46,16 +46,18 @@ const PAYMENTS = [
   ["cash", "pay_cash", "ti-cash"],
   ["payme", "pay_payme", "ti-credit-card"],
   ["paynet", "pay_paynet", "ti-wallet"],
+  ["click", "pay_click", "ti-credit-card"],
   ["telegram", "pay_online", "ti-credit-card"],
 ];
-const PROVIDER_NAME = { payme: "Payme", paynet: "Paynet", telegram: "Telegram" };
+const PROVIDER_NAME = { payme: "Payme", paynet: "Paynet", click: "Click", telegram: "Telegram" };
 // Плитки «Онлайн оплаты»: показываются всегда. Не включённый для покупателя
 // способ — бледный, с пометкой «Скоро»: нажал — объясняем, что пока наличными.
 // Логотипы — надписи в цветах самих сервисов: файлов логотипов у нас нет
-const ONLINE = ["payme", "paynet"];
+const ONLINE = ["payme", "click", "paynet"];
 const LOGO = {
   payme: `<span class="lg lg-payme"><b>pay</b><i>me</i></span>`,
   paynet: `<span class="lg lg-paynet">paynet</span>`,
+  click: `<span class="lg lg-click">click</span>`,
   telegram: `<span class="lg"><i class="ti ti-brand-telegram"></i></span>`,
 };
 
@@ -82,11 +84,11 @@ const I18N = {
     cart_hint: "Состав можно менять до оформления заказа",
     goods_n: "Товары ({n})", goods: "Товары", delivery: "Доставка", total: "Итого",
     pay_cash: "Наличными курьеру", pay_online: "Онлайн картой",
-    pay_payme: "Картой через Payme", pay_paynet: "Через Paynet",
+    pay_payme: "Картой через Payme", pay_paynet: "Через Paynet", pay_click: "Через Click",
     pay_with: "Оплатить через {name}",
     pay_online_group: "Онлайн оплата", soon: "Скоро",
     soon_note: "Оплата через {name} скоро появится. Пока можно оплатить наличными курьеру.",
-    pick_online: "Выберите, чем оплатить онлайн: Payme или Paynet.",
+    pick_online: "Выберите, чем оплатить онлайн: Payme, Click или Paynet.",
     confirm_order: "Подтвердить заказ",
     fill_fields: "Заполните имя, номер телефона в формате +998 XX XXX XX XX и адрес доставки.",
     need_consent: "Отметьте согласие на обработку данных.",
@@ -107,7 +109,7 @@ const I18N = {
     expired_t: "Заказ отменён", expired_s: "Время на оплату вышло. Оформите заказ заново.",
     late_t: "Заказ отменён, а оплата прошла",
     late_s: "Магазин свяжется с вами, чтобы вернуть деньги или восстановить заказ.",
-    external_t: "Оплатите на странице Payme",
+    external_t: "Оплатите на странице {name}",
     external_s: "Когда оплатите, вернитесь сюда — статус обновится сам.",
     paynet_t: "Оплатите в Paynet",
     paynet_s: "Откройте приложение Paynet, найдите <b>ROZMART</b> и введите номер заказа "
@@ -115,7 +117,7 @@ const I18N = {
     copy_number: "Скопировать номер заказа", copied: "Номер заказа скопирован",
     open_paynet: "Открыть Paynet",
     sum_paid: "Оплачено", sum_due: "К оплате", sum_courier: "Оплата курьеру",
-    pay: "Оплатить", i_paid: "Я оплатил — проверить", payme_again: "Открыть Payme ещё раз",
+    pay: "Оплатить", i_paid: "Я оплатил — проверить", payme_again: "Открыть {name} ещё раз",
     order_number: "Номер заказа",
     forget_q: "Удалить имя, телефон и адрес? Уже оформленные заказы останутся.",
     forget_fail: "Не удалось удалить. Проверьте связь.",
@@ -179,12 +181,12 @@ const I18N = {
     cart_hint: "Buyurtma berilgunga qadar tarkibini o'zgartirish mumkin",
     goods_n: "Mahsulotlar ({n})", goods: "Mahsulotlar", delivery: "Yetkazib berish", total: "Jami",
     pay_cash: "Kuryerga naqd pul", pay_online: "Karta orqali onlayn",
-    pay_payme: "Payme orqali karta bilan", pay_paynet: "Paynet orqali",
+    pay_payme: "Payme orqali karta bilan", pay_paynet: "Paynet orqali", pay_click: "Click orqali",
     pay_with: "{name} orqali to'lash",
     pay_online_group: "Onlayn to'lov", soon: "Tez orada",
     soon_note: "{name} orqali to'lov tez orada qo'shiladi. Hozircha kuryerga naqd pul bilan "
       + "to'lashingiz mumkin.",
-    pick_online: "Onlayn to'lov usulini tanlang: Payme yoki Paynet.",
+    pick_online: "Onlayn to'lov usulini tanlang: Payme, Click yoki Paynet.",
     confirm_order: "Buyurtmani tasdiqlash",
     fill_fields: "Ism, +998 XX XXX XX XX formatidagi telefon raqami va yetkazib berish "
       + "manzilini kiriting.",
@@ -208,7 +210,7 @@ const I18N = {
     expired_s: "To'lov vaqti tugadi. Buyurtmani qaytadan bering.",
     late_t: "Buyurtma bekor qilingan, lekin to'lov o'tdi",
     late_s: "Do'kon pulni qaytarish yoki buyurtmani tiklash uchun siz bilan bog'lanadi.",
-    external_t: "Payme sahifasida to'lang",
+    external_t: "{name} sahifasida to'lang",
     external_s: "To'lagandan so'ng shu yerga qayting — holat o'zi yangilanadi.",
     paynet_t: "Paynet'da to'lang",
     paynet_s: "Paynet ilovasini oching, <b>ROZMART</b>ni toping va buyurtma raqamini kiriting: "
@@ -216,7 +218,7 @@ const I18N = {
     copy_number: "Buyurtma raqamini nusxalash", copied: "Buyurtma raqami nusxalandi",
     open_paynet: "Paynet'ni ochish",
     sum_paid: "To'landi", sum_due: "To'lanadi", sum_courier: "Kuryerga to'lov",
-    pay: "To'lash", i_paid: "To'ladim — tekshirish", payme_again: "Payme'ni qayta ochish",
+    pay: "To'lash", i_paid: "To'ladim — tekshirish", payme_again: "{name}'ni qayta ochish",
     order_number: "Buyurtma raqami",
     forget_q: "Ism, telefon va manzil o'chirilsinmi? Berilgan buyurtmalar saqlanib qoladi.",
     forget_fail: "O'chirib bo'lmadi. Aloqani tekshiring.",
@@ -932,7 +934,7 @@ function renderDone(order, mode) {
     slow: ["ti-clock", t("slow_t"), t("slow_s")],
     expired: ["ti-x", t("expired_t"), t("expired_s")],
     late: ["ti-alert-triangle", t("late_t"), t("late_s")],
-    external: ["ti-external-link", t("external_t"),
+    external: ["ti-external-link", t("external_t", { name: PROVIDER_NAME[externalProvider()] }),
       `${t("external_s")}<br>${esc(payUntilText(order))}`],
     paynet: ["ti-wallet", t("paynet_t"),
       `${t("paynet_s", {
@@ -960,8 +962,8 @@ function renderDone(order, mode) {
         ${t("i_paid")}</button>` : ""}
     ${mode === "external" ? `<button class="btn" data-check-pay="${esc(order.number)}" style="margin-bottom:10px">
       ${t("i_paid")}</button>
-      <button class="btn" data-pay="${esc(order.number)}" data-provider="payme" style="margin-bottom:14px;background:#F2F2F2;color:#1A1A1A">
-      ${t("payme_again")}</button>` : ""}
+      <button class="btn" data-pay="${esc(order.number)}" data-provider="${esc(externalProvider())}" style="margin-bottom:14px;background:#F2F2F2;color:#1A1A1A">
+      ${t("payme_again", { name: PROVIDER_NAME[externalProvider()] })}</button>` : ""}
     <div class="card" style="background:#F7F7F7;text-align:center">
       <div class="mut" style="font-size:12px;margin-bottom:4px">${t("order_number")}</div>
       <div style="font-size:21px;font-weight:600;letter-spacing:.6px">${esc(order.number)}</div>
@@ -1843,9 +1845,9 @@ async function payOrder(number, provider) {
     const invoice = await api(`/api/orders/${encodeURIComponent(number)}/invoice${query}`,
       { method: "POST" });
     const { link, kind } = invoice;
-    if (kind === "payme") {
+    if (kind === "payme" || kind === "click") {
       state.paying = false;
-      return openPayme(tg, number, link);
+      return openPayme(tg, number, link, kind);
     }
     if (kind === "paynet") {
       state.paying = false;
@@ -1903,8 +1905,15 @@ async function copyText(text) {
   note(t("copied"));
 }
 
-function openPayme(tg, number, link) {
+/** Покупатель ушёл платить на страницу Payme или Click: какой — для текстов и
+ *  кнопки «открыть ещё раз». */
+function externalProvider() {
+  return state.externalProvider || "payme";
+}
+
+function openPayme(tg, number, link, provider) {
   state.payingExternal = number;
+  state.externalProvider = provider || "payme";
   if (tg.openLink) tg.openLink(link); else window.open(link, "_blank");
   const order = (state.orders || []).find((o) => o.number === number);
   renderDone(order || orderStub(number), "external");

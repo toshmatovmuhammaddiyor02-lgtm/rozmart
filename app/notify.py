@@ -218,6 +218,12 @@ STAFF_TEXTS = {
         "courier_off": "↩️ Доставщик {courier} отключён — заказ <b>{number}</b> снова свободен",
         "refund": "↩️ Возврат через Payme по заказу <b>{number}</b> — {total} вернутся покупателю.",
         "refund_paynet": "↩️ Paynet отменил оплату заказа <b>{number}</b> — {total} вернутся покупателю.",
+        "click_late_back": "↩️ Click: оплата заказа <b>{number}</b> пришла, когда заказ уже был "
+                           "«{state}». {total} возвращены покупателю (платёж {payment}).",
+        "click_late_manual": "⚠️ Click: оплата заказа <b>{number}</b> пришла, когда заказ уже был "
+                             "«{state}». Списано {total}, платёж {payment}.\n"
+                             "Вернуть автоматически не удалось — верните в кабинете "
+                             "merchant.click.uz или восстановите заказ.",
         "refund_canceled": "Заказ отменён — не собирать и не выдавать.",
         "refund_status": "Статус заказа: {status}.",
         "late": "⚠️ Оплата картой по заказу <b>{number}</b>, а заказ {state}.\n"
@@ -258,6 +264,12 @@ STAFF_TEXTS = {
                   "xaridorga qaytariladi.",
         "refund_paynet": "↩️ Paynet <b>{number}</b> buyurtma to'lovini bekor qildi — {total} "
                          "xaridorga qaytariladi.",
+        "click_late_back": "↩️ Click: <b>{number}</b> buyurtma to'lovi buyurtma «{state}» "
+                           "bo'lgandan keyin keldi. {total} xaridorga qaytarildi (to'lov {payment}).",
+        "click_late_manual": "⚠️ Click: <b>{number}</b> buyurtma to'lovi buyurtma «{state}» "
+                             "bo'lgandan keyin keldi. Yechildi {total}, to'lov {payment}.\n"
+                             "Avtomatik qaytarib bo'lmadi — merchant.click.uz kabinetida qaytaring "
+                             "yoki buyurtmani tiklang.",
         "refund_canceled": "Buyurtma bekor qilindi — yig'ilmasin va berilmasin.",
         "refund_status": "Buyurtma holati: {status}.",
         "late": "⚠️ <b>{number}</b> buyurtma uchun karta orqali to'lov keldi, lekin buyurtma {state}.\n"

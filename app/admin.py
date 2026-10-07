@@ -935,13 +935,14 @@ def set_variant_price(
 
 # ------------------------------------------------------- онлайн-оплата: вкл/выкл
 
-PROVIDER_TITLES = {"payme": "Payme", "paynet": "Paynet", "telegram": "Telegram"}
+PROVIDER_TITLES = {"payme": "Payme", "paynet": "Paynet", "click": "Click", "telegram": "Telegram"}
+SHOWN_FIRST = ("payme", "paynet", "click")
 
 
 def _payment_switches() -> dict:
     off = payments.switched_off()
-    shown = [p for p in ("payme", "paynet") if p in payments.PROVIDERS] + \
-        [p for p in payments.PROVIDERS if p not in ("payme", "paynet")]
+    shown = [p for p in SHOWN_FIRST if p in payments.PROVIDERS] + \
+        [p for p in payments.PROVIDERS if p not in SHOWN_FIRST]
     return {"providers": [{
         "provider": p,
         "title": PROVIDER_TITLES.get(p, p),
@@ -949,7 +950,7 @@ def _payment_switches() -> dict:
         # ключи заданы — способ может работать; нет — покупатель видит «Скоро»
         "configured": payments.configured(p),
         "test": payments.is_test(p),
-        "testers_only": payments.is_test(p) or payments.TESTERS_ONLY,
+        "testers_only": payments.is_test(p) or payments.pilot(p),
     } for p in shown]}
 
 
@@ -958,7 +959,8 @@ def payment_switches(request: Request, _: TelegramUser = Depends(require_admin))
     """Способы онлайн-оплаты, их переключатели и ключи (секреты — хвостом)."""
     base = os.getenv("PUBLIC_URL", "").strip().rstrip("/") or str(request.base_url).rstrip("/")
     return {**_payment_switches(), "config": payments.config_view(),
-            "endpoints": {"payme": base + "/payme", "paynet": base + "/paynet"}}
+            "endpoints": {"payme": base + "/payme", "paynet": base + "/paynet",
+                          "click": [base + "/click/prepare", base + "/click/complete"]}}
 
 
 class PaymentConfigIn(BaseModel):
@@ -982,10 +984,17 @@ def set_payment_config(data: PaymentConfigIn, request: Request, db: Session = De
                                 detail="ID кассы Payme — 24 символа: цифры и латинские a–f")
         if name == "PAYNET_SERVICE_ID" and value and not value.isdigit():
             raise HTTPException(status_code=400, detail="Номер сервиса Paynet — только цифры")
+        if name in ("CLICK_SERVICE_ID", "CLICK_MERCHANT_ID", "CLICK_MERCHANT_USER_ID") \
+                and value and not value.isdigit():
+            raise HTTPException(status_code=400, detail="ID в Click — только цифры")
+        if name == "CLICK_TIN" and value and not re.fullmatch(r"[0-9]{9}|[0-9]{14}", value):
+            raise HTTPException(status_code=400, detail="ИНН — 9 цифр (или ПИНФЛ — 14)")
+        if name == "CLICK_DELIVERY_SPIC" and value and not re.fullmatch(r"[0-9]{17}", value):
+            raise HTTPException(status_code=400, detail="ИКПУ — 17 цифр")
         if name == "TEST_USERS" and value and not re.fullmatch(r"[0-9]+(\s*,\s*[0-9]+)*", value):
             raise HTTPException(status_code=400,
                                 detail="Тестировщики — Telegram-id цифрами через запятую")
-        if name in ("PAYME_TEST", "PAYNET_TEST", "TESTERS_ONLY") and value not in ("0", "1"):
+        if name in ("PAYME_TEST", "PAYNET_TEST", "TESTERS_ONLY", "CLICK_PILOT") and value not in ("0", "1"):
             raise HTTPException(status_code=400, detail="Режим — 0 или 1")
         if name in payments.SECRETS and len(value) < 8:
             raise HTTPException(status_code=400, detail="Ключ или пароль короче 8 символов")

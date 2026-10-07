@@ -314,6 +314,37 @@ class PaynetTransaction(Base):
     canceled_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
+class ClickTransaction(Base):
+    """Платёж через Click SHOP API (app/click.py).
+
+    Click спрашивает нас дважды: Prepare — можно ли оплатить, Complete —
+    деньги списаны (или не списались). Наш id — merchant_prepare_id и он же
+    merchant_confirm_id. Состояния: 0 подготовлен, 1 проведён, -1 отменён
+    (Click сообщил об ошибке оплаты), -2 деньги пришли, а заказ их уже не
+    ждал — платёж возвращаем, -3 возврат не удался, нужен человек.
+    """
+
+    __tablename__ = "click_transactions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    click_trans_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
+    # номер платежа в Click — по нему фискализация и возврат
+    click_paydoc_id: Mapped[int | None] = mapped_column(BigInteger)
+    order_id: Mapped[int | None] = mapped_column(
+        ForeignKey("orders.id", ondelete="SET NULL"), index=True)
+    order_number: Mapped[str] = mapped_column(String(20))
+    amount: Mapped[int] = mapped_column(BigInteger)          # в сумах
+    state: Mapped[int]
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    canceled_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # чек в налоговую: None — не отправляли, ok, error; что ответил Click
+    fiscal_status: Mapped[str | None] = mapped_column(String(10))
+    fiscal_note: Mapped[str | None] = mapped_column(Text)
+    fiscal_attempts: Mapped[int] = mapped_column(default=0)
+    fiscal_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
 class PaymeTransaction(Base):
     """Транзакция Payme (Merchant API).
 

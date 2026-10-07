@@ -14,7 +14,10 @@
   сам спрашивает наш сервер по шагам. Только так Payme передаёт фискальный
   чек в налоговую. См. app/payme.py;
 * `paynet` — универсальный WEB-сервис Paynet: покупатель платит в самом
-  Paynet по номеру заказа. См. app/paynet.py.
+  Paynet по номеру заказа. См. app/paynet.py;
+* `click` — Click SHOP API: покупатель уходит на страницу my.click.uz, Click
+  спрашивает наш сервер (Prepare, Complete), чек в налоговую отправляем мы.
+  См. app/click.py.
 
 Общее у них: заказ ждёт оплаты в NEW и в REGOS не уходит, неоплаченный
 отменяется через UNPAID_MINUTES, оплата проводится одной условной записью
@@ -59,7 +62,7 @@ from app.telegram import BOT_TOKEN
 log = logging.getLogger(__name__)
 
 # Включённые способы оплаты в том порядке, в каком их видит покупатель.
-KNOWN = ("telegram", "payme", "paynet")
+KNOWN = ("telegram", "payme", "paynet", "click")
 PROVIDERS = [p for p in (os.getenv("PAYMENT_PROVIDERS") or os.getenv("PAYMENT_PROVIDER")
                          or "telegram").replace(" ", "").lower().split(",") if p in KNOWN]
 # основной — для заказов, где способ не выбран (оформленных до выбора)
@@ -84,6 +87,21 @@ PAYNET_TEST = os.getenv("PAYNET_TEST", "1").strip() != "0"
 # Ссылка на оплату сервиса в Paynet, если Paynet её даст: {service}, {order}, {amount}
 PAYNET_PAY_URL = os.getenv("PAYNET_PAY_URL", "").strip()
 
+# Click: сервис, поставщик, пользователь для Merchant API и секретный ключ —
+# из кабинета merchant.click.uz. Тестовой среды у Click нет, платежи всегда
+# настоящие, поэтому вместо тестового режима — пилот: CLICK_PILOT=1 (так по
+# умолчанию) — способ видят только тестировщики. См. app/click.py
+CLICK_SERVICE_ID = os.getenv("CLICK_SERVICE_ID", "").strip()
+CLICK_MERCHANT_ID = os.getenv("CLICK_MERCHANT_ID", "").strip()
+CLICK_MERCHANT_USER_ID = os.getenv("CLICK_MERCHANT_USER_ID", "").strip()
+CLICK_SECRET_KEY = os.getenv("CLICK_SECRET_KEY", "").strip()
+CLICK_PILOT = os.getenv("CLICK_PILOT", "1").strip() != "0"
+# Для чека: ИНН продавца (CommissionInfo у Click обязателен) и ИКПУ с кодом
+# упаковки доставки — у товаров они свои, из REGOS, а у доставки их нет
+CLICK_TIN = os.getenv("CLICK_TIN", "").strip()
+CLICK_DELIVERY_SPIC = os.getenv("CLICK_DELIVERY_SPIC", "").strip()
+CLICK_DELIVERY_PACKAGE = os.getenv("CLICK_DELIVERY_PACKAGE", "").strip()
+
 # Секрет вебхука магазинного бота. Без него вебхук отвергает всё, и оплата
 # гарантированно не пройдёт: запрос перед списанием уйдёт в тайм-аут.
 # Поэтому без секрета оплата картой считается выключенной.
@@ -105,7 +123,7 @@ UNPAID_MINUTES = int(os.getenv("UNPAID_ORDER_MINUTES", "30"))
 # Пока окно оплаты открыто, заказ по таймауту не отменяем. Пять минут — с запасом
 # на ввод карты и подтверждение по СМС. У Payme покупатель уходит на другую
 # страницу, иногда в приложение Payme, — там дольше, поэтому запас больше.
-CHECKOUT_GRACE = timedelta(minutes=15 if {"payme", "paynet"} & set(PROVIDERS) else 5)
+CHECKOUT_GRACE = timedelta(minutes=15 if {"payme", "paynet", "click"} & set(PROVIDERS) else 5)
 
 CURRENCY = "UZS"
 # У сума в Telegram два знака после запятой (exp=2): суммы передаются в тийинах.
@@ -137,6 +155,8 @@ def configured(provider: str) -> bool:
         return bool(PAYME_MERCHANT_ID and PAYME_KEY)
     if provider == "paynet":
         return bool(PAYNET_LOGIN and PAYNET_PASSWORD and PAYNET_SERVICE_ID)
+    if provider == "click":
+        return bool(CLICK_SERVICE_ID and CLICK_MERCHANT_ID and CLICK_SECRET_KEY)
     if provider == "telegram":
         return bool(TOKEN and SHOP_SECRET)
     return False
@@ -161,7 +181,14 @@ def is_test(provider: str | None = None) -> bool:
         return PAYME_TEST
     if provider == "paynet":
         return PAYNET_TEST
+    if provider == "click":
+        return False                        # тестовой среды у Click нет
     return ":TEST:" in TOKEN
+
+
+def pilot(provider: str) -> bool:
+    """Способ настоящий, но видят его пока только тестировщики."""
+    return TESTERS_ONLY or (provider == "click" and CLICK_PILOT)
 
 
 # ------------------------------------------------------------ настройки из панели
@@ -185,10 +212,13 @@ CONFIG_FIELDS = {
     "PAYME_MERCHANT_ID": str, "PAYME_KEY": str, "PAYME_TEST": lambda v: v != "0",
     "PAYNET_SERVICE_ID": str, "PAYNET_LOGIN": str, "PAYNET_PASSWORD": str,
     "PAYNET_TEST": lambda v: v != "0", "PAYNET_PAY_URL": str,
+    "CLICK_SERVICE_ID": str, "CLICK_MERCHANT_ID": str, "CLICK_MERCHANT_USER_ID": str,
+    "CLICK_SECRET_KEY": str, "CLICK_PILOT": lambda v: v != "0", "CLICK_TIN": str,
+    "CLICK_DELIVERY_SPIC": str, "CLICK_DELIVERY_PACKAGE": str,
     "TEST_USERS": lambda v: {int(x) for x in v.replace(" ", "").split(",") if x.isdigit()},
     "TESTERS_ONLY": lambda v: v == "1",
 }
-SECRETS = {"PAYME_KEY", "PAYNET_PASSWORD"}
+SECRETS = {"PAYME_KEY", "PAYNET_PASSWORD", "CLICK_SECRET_KEY"}
 # что панель показывает только хвостом «••••abcd»: секреты и ID кассы
 MASKED = SECRETS | {"PAYME_MERCHANT_ID"}
 # значения из окружения — к ним возвращаемся, если в панели поле очистили
@@ -296,7 +326,7 @@ def providers_for(telegram_id: int | None) -> list[str]:
     tester = telegram_id is not None and telegram_id in TEST_USERS
     off = switched_off()
     return [p for p in active()
-            if p not in off and (tester or (not is_test(p) and not TESTERS_ONLY))]
+            if p not in off and (tester or (not is_test(p) and not pilot(p)))]
 
 
 def available_for(telegram_id: int | None, provider: str | None = None) -> bool:
@@ -524,6 +554,8 @@ def worker() -> None:
         db = SessionLocal()
         try:
             cancel_stale(db)
+            from app import click
+            click.retry_fiscal(db)
         except Exception:                       # noqa: BLE001
             # поток обязан пережить что угодно: иначе неоплаченные заказы
             # начнут копиться, а служба останется живой, и никто не заметит

@@ -135,7 +135,7 @@ class OrderIn(ContactIn):
     delivery_slot: DeliverySlot
     payment_method: PaymentMethod
     # способ онлайн-оплаты: какой выбрал покупатель. Для наличных не нужен
-    pay_provider: Literal["telegram", "payme", "paynet"] | None = None
+    pay_provider: Literal["telegram", "payme", "paynet", "click"] | None = None
     comment: str | None = Field(default=None, max_length=500)
     items: list[OrderItemIn] = Field(min_length=1, max_length=50)
     # ключ попытки оформления: повтор с тем же ключом вернёт уже созданный заказ

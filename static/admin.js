@@ -582,6 +582,17 @@
       ['PAYNET_PAY_URL', 'Ссылка на оплату в Paynet', 'text',
        'Если Paynet даст: {service}, {order}, {amount}. Пусто — покупатель вводит номер сам'],
       ['PAYNET_TEST', 'Тестовый режим', 'bool', 'Выключено — настоящие деньги']
+    ],
+    click: [
+      ['CLICK_SERVICE_ID', 'Service ID', 'text', 'Из кабинета merchant.click.uz'],
+      ['CLICK_MERCHANT_ID', 'Merchant ID', 'text', 'Из кабинета merchant.click.uz'],
+      ['CLICK_MERCHANT_USER_ID', 'Merchant user ID', 'text', 'Нужен для чека в налоговую и возвратов'],
+      ['CLICK_SECRET_KEY', 'Секретный ключ', 'secret', 'Из кабинета, в чаты не пересылать'],
+      ['CLICK_TIN', 'ИНН продавца', 'text', 'Для чека: 9 цифр'],
+      ['CLICK_DELIVERY_SPIC', 'ИКПУ доставки', 'text', 'Для чека, если доставка платная: 17 цифр'],
+      ['CLICK_DELIVERY_PACKAGE', 'Код упаковки доставки', 'text', 'Для чека, если доставка платная'],
+      ['CLICK_PILOT', 'Пилот: видят только тестировщики', 'bool',
+       'Тестовой среды у Click нет — платежи всегда настоящие. Выключите, чтобы открыть всем']
     ]
   };
 
@@ -645,6 +656,8 @@
         'Заменить ' + (values.PAYME_KEY ? 'ключ' : 'ID') + ' кассы Payme?\n\n'
         + 'Если он не совпадает с кабинетом Payme Business, оплаты у покупателей '
         + 'перестанут проходить.')) return;
+    if (values.CLICK_SECRET_KEY && !confirm('Заменить секретный ключ Click? Если он не совпадает '
+        + 'с кабинетом merchant.click.uz, оплаты через Click перестанут проходить.')) return;
     if (values.PAYNET_PASSWORD && !confirm('Заменить пароль Paynet? Старый перестанет работать — '
         + 'новый нужно сразу передать Paynet.')) return;
     api('/payments/config', {
@@ -701,8 +714,13 @@
       if (data.endpoints && data.endpoints[p.provider]) {
         var ep = el('div', 'hint');
         ep.style.marginBottom = '14px';
-        ep.appendChild(document.createTextNode('Адрес для ' + p.title + ': '));
-        ep.appendChild(el('code', null, data.endpoints[p.provider]));
+        var urls = [].concat(data.endpoints[p.provider]);
+        ep.appendChild(document.createTextNode((urls.length > 1 ? 'Адреса' : 'Адрес') + ' для '
+                                               + p.title + ': '));
+        urls.forEach(function (u, i) {
+          if (i) ep.appendChild(document.createTextNode(', '));
+          ep.appendChild(el('code', null, u));
+        });
         card.appendChild(ep);
       }
       var fields = PAY_FIELDS[p.provider] || [];
