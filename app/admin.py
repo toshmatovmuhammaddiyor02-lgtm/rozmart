@@ -149,6 +149,11 @@ class VariantRow(BaseModel):
     manual_price: int | None = None   # своя цена, если задана
     barcode: str | None
     is_active: bool
+    # реквизиты фискального чека Payme и Click: обычно приходят из REGOS,
+    # но их можно вписать и здесь, пока бухгалтерия не заполнила в REGOS
+    mxik: str | None = None
+    package_code: str | None = None
+    vat_percent: int | None = None
 
 
 class ProductRow(BaseModel):
@@ -325,6 +330,7 @@ def get_product(
                 id=v.id, external_code=v.external_code, weight=v.weight,
                 price=v.price, regos_price=v.regos_price, manual_price=v.manual_price,
                 barcode=v.barcode, is_active=v.is_active,
+                mxik=v.mxik, package_code=v.package_code, vat_percent=v.vat_percent,
             )
             for v in sorted(product.variants, key=lambda v: v.weight_grams)
         ],
@@ -946,6 +952,41 @@ def set_variant_price(
     db.commit()
     log.info("Фасовка %s: своя цена %s (REGOS %s)",
              variant.external_code, data.price, variant.regos_price)
+    return get_product(variant.product_id, db)
+
+
+class FiscalPatch(BaseModel):
+    mxik: str = Field(default="", max_length=40)
+    package_code: str = Field(default="", max_length=40)
+
+
+@router.patch("/variants/{variant_id}/fiscal", response_model=ProductDetail)
+def set_variant_fiscal(
+    variant_id: int,
+    data: FiscalPatch,
+    db: Session = Depends(get_db),
+    _: TelegramUser = Depends(require_admin),
+):
+    """ИКПУ и код упаковки фасовки — для фискального чека Payme и Click.
+
+    Синхронизация с REGOS пустым не затирает (catalog_sync.apply_fiscal),
+    а заполненное в REGOS ставит вместо вписанного здесь: главный источник —
+    REGOS, панель — пока там пусто.
+    """
+    variant = db.get(Variant, variant_id)
+    if variant is None:
+        raise HTTPException(status_code=404, detail="Фасовка не найдена")
+    mxik = re.sub(r"\s+", "", data.mxik or "")
+    package = re.sub(r"\s+", "", data.package_code or "")
+    if mxik and not re.fullmatch(r"[0-9]{17}", mxik):
+        raise HTTPException(status_code=400, detail="ИКПУ — 17 цифр")
+    if package and not re.fullmatch(r"[0-9]{1,20}", package):
+        raise HTTPException(status_code=400, detail="Код упаковки — только цифры, до 20")
+    variant.mxik = mxik or None
+    variant.package_code = package or None
+    db.commit()
+    log.info("Фасовка %s: ИКПУ %s, код упаковки %s", variant.external_code,
+             variant.mxik or "—", variant.package_code or "—")
     return get_product(variant.product_id, db)
 
 

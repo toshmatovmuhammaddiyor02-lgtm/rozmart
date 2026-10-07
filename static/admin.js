@@ -175,7 +175,51 @@
       : (v.regos_price != null ? 'цена REGOS' : 'в REGOS цены нет — фасовка не продаётся');
     row.appendChild(el('div', 'meta', source + ' · код ' + v.external_code +
       (v.barcode ? ' · ш/к ' + v.barcode : '') + (v.is_active ? '' : ' · скрыта')));
+    row.appendChild(fiscalRow(v));
     return row;
+  }
+
+  // ИКПУ и код упаковки — для фискального чека Payme и Click. Обычно приходят
+  // из REGOS; пусто там — можно вписать здесь, REGOS потом заменит своим
+  function fiscalRow(v) {
+    var box = el('div');
+    box.style.cssText = 'display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-top:8px';
+    function input(label, value, placeholder, width) {
+      var w = el('div');
+      w.appendChild(el('div', 'meta', label));
+      var i = document.createElement('input');
+      i.value = value || '';
+      i.placeholder = placeholder;
+      i.inputMode = 'numeric';
+      i.spellcheck = false;
+      i.style.cssText = 'max-width:' + width + 'px';
+      w.appendChild(i);
+      box.appendChild(w);
+      return i;
+    }
+    var mxik = input('ИКПУ', v.mxik, '17 цифр', 200);
+    var pack = input('Код упаковки', v.package_code, 'цифры', 140);
+    var save = el('button', 'act ghost', 'Сохранить коды');
+    save.onclick = function () {
+      save.disabled = true;
+      api('/variants/' + v.id + '/fiscal', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mxik: mxik.value.trim(), package_code: pack.value.trim() })
+      }).then(function (p) {
+        say('ИКПУ и код упаковки сохранены', 'ok');
+        return api('/categories').then(function (cats) { renderProduct(p, cats); });
+      }).catch(function (e) { say(e.message); save.disabled = false; });
+    };
+    box.appendChild(save);
+    var wrap = el('div');
+    wrap.appendChild(box);
+    var missing = [!v.mxik && 'ИКПУ', !v.package_code && 'кода упаковки'].filter(Boolean);
+    wrap.appendChild(el('div', 'meta', (missing.length
+      ? 'Нет ' + missing.join(' и ') + ' — чек Payme/Click может не уйти в налоговую. '
+      : '') + 'НДС ' + (v.vat_percent != null ? v.vat_percent + '%' : 'не указан (в чеке 12%)')
+      + '. Заполненное в REGOS заменит вписанное здесь.'));
+    return wrap;
   }
 
   function setPrice(variantId, price) {
