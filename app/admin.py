@@ -960,7 +960,36 @@ def payment_switches(request: Request, _: TelegramUser = Depends(require_admin))
     base = os.getenv("PUBLIC_URL", "").strip().rstrip("/") or str(request.base_url).rstrip("/")
     return {**_payment_switches(), "config": payments.config_view(),
             "endpoints": {"payme": base + "/payme", "paynet": base + "/paynet",
-                          "click": [base + "/click/prepare", base + "/click/complete"]}}
+                          "click": [base + "/click/prepare", base + "/click/complete"]},
+            "regos_payment_types": regos_payment_types()}
+
+
+# формы оплаты REGOS для выбора в панели: справочник меняется редко
+_regos_types = {"at": 0.0, "rows": []}
+
+
+def regos_payment_types() -> list[dict]:
+    """Формы оплаты из REGOS (PaymentType/Get), которые можно выбрать на кассе.
+    REGOS недоступен — пустой список: панель покажет поле без выбора."""
+    import time
+
+    from app.regos import config as regos_config
+    from app.regos.client import RegosClient
+
+    if time.time() - _regos_types["at"] < 300 and _regos_types["rows"]:
+        return _regos_types["rows"]
+    if not regos_config.is_configured():
+        return []
+    try:
+        rows = RegosClient().call("PaymentType/Get", {}) or []
+    except Exception as exc:                # noqa: BLE001
+        log.warning("Формы оплаты REGOS не получены: %s", exc)
+        return _regos_types["rows"]
+    _regos_types["rows"] = [
+        {"id": r.get("id"), "name": r.get("name"), "cash": bool(r.get("is_cash"))}
+        for r in rows if str(r.get("enabled", "")).lower() in ("true", "frontoffice")]
+    _regos_types["at"] = time.time()
+    return _regos_types["rows"]
 
 
 class PaymentConfigIn(BaseModel):
@@ -987,6 +1016,8 @@ def set_payment_config(data: PaymentConfigIn, request: Request, db: Session = De
         if name in ("CLICK_SERVICE_ID", "CLICK_MERCHANT_ID", "CLICK_MERCHANT_USER_ID") \
                 and value and not value.isdigit():
             raise HTTPException(status_code=400, detail="ID в Click — только цифры")
+        if name.startswith("REGOS_PAY_") and value and not value.isdigit():
+            raise HTTPException(status_code=400, detail="Форма оплаты REGOS — номер из справочника")
         if name == "CLICK_TIN" and value and not re.fullmatch(r"[0-9]{9}|[0-9]{14}", value):
             raise HTTPException(status_code=400, detail="ИНН — 9 цифр (или ПИНФЛ — 14)")
         if name == "CLICK_DELIVERY_SPIC" and value and not re.fullmatch(r"[0-9]{17}", value):

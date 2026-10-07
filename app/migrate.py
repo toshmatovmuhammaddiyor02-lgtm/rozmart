@@ -62,6 +62,11 @@ COLUMNS = [
     # фискальный чек из SetFiscalData
     ("payme_transactions", "fiscal_qr_url", "TEXT"),
     ("payme_transactions", "fiscal_data", "TEXT"),
+    # фискальный чек онлайн-оплаты — в заказ REGOS, чтобы касса не печатала второй
+    ("orders", "fiscal_qr_url", "TEXT"),
+    ("orders", "fiscal_qr_regos_at", "TIMESTAMP"),
+    ("orders", "fiscal_qr_regos_error", "TEXT"),
+    ("orders", "fiscal_qr_regos_tries", "INTEGER DEFAULT 0 NOT NULL"),
     # бот доставщиков: кто взял заказ и когда доставил
     ("orders", "courier_id", "BIGINT"),
     ("orders", "courier_name", "VARCHAR(200)"),

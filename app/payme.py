@@ -26,7 +26,8 @@ Payme повторяет запросы, если не дождался отве
 185.234.113.1–185.234.113.15.
 
 SetFiscalData — необязательный метод: Payme присылает в него фискальный чек
-из налоговой после проведения. Сохраняем его у транзакции.
+из налоговой после проведения. Сохраняем его у транзакции, а ссылку на чек
+передаём в заказ REGOS: с ней касса не печатает второй чек на ту же продажу.
 """
 import base64
 import hmac
@@ -420,7 +421,7 @@ def statement(db: Session, params: dict) -> dict:
     } for tx in rows]}
 
 
-def set_fiscal(db: Session, params: dict) -> dict:
+def set_fiscal(db: Session, params: dict, background: BackgroundTasks | None = None) -> dict:
     """Фискальный чек от Payme: сохраняем как есть и QR-ссылку отдельно."""
     fiscal = params.get("fiscal_data")
     payme_id = params.get("id")
@@ -438,6 +439,9 @@ def set_fiscal(db: Session, params: dict) -> dict:
     db.commit()
     log.info("Payme: фискальный чек %s по заказу %s, статус %s",
              kind, tx.order_number, fiscal.get("status_code"))
+    if kind != "CANCEL" and tx.fiscal_qr_url and tx.state == PERFORMED and tx.order_id:
+        from app.regos.orders_push import set_fiscal_qr
+        set_fiscal_qr(db, db.get(Order, tx.order_id), tx.fiscal_qr_url, background)
     return {"success": True}
 
 
@@ -448,7 +452,7 @@ METHODS = {
     "CancelTransaction": cancel,
     "CheckTransaction": lambda db, p, bg: check(db, p),
     "GetStatement": lambda db, p, bg: statement(db, p),
-    "SetFiscalData": lambda db, p, bg: set_fiscal(db, p),
+    "SetFiscalData": lambda db, p, bg: set_fiscal(db, p, bg),
 }
 
 

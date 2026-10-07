@@ -102,6 +102,15 @@ CLICK_TIN = os.getenv("CLICK_TIN", "").strip()
 CLICK_DELIVERY_SPIC = os.getenv("CLICK_DELIVERY_SPIC", "").strip()
 CLICK_DELIVERY_PACKAGE = os.getenv("CLICK_DELIVERY_PACKAGE", "").strip()
 
+# Форма оплаты в REGOS для заказа, оплаченного этим способом: id из
+# справочника PaymentType. Пусто — «онлайн» по умолчанию (REGOS_PAYMENT_ONLINE_ID,
+# «Пласт. карта»). Своя форма со своим счётом не смешивает онлайн-деньги
+# с терминалом магазина и даёт кассиру закрыть чек одной кнопкой
+REGOS_PAY_PAYME = os.getenv("REGOS_PAY_PAYME", "").strip()
+REGOS_PAY_CLICK = os.getenv("REGOS_PAY_CLICK", "").strip()
+REGOS_PAY_PAYNET = os.getenv("REGOS_PAY_PAYNET", "").strip()
+REGOS_PAY_TELEGRAM = os.getenv("REGOS_PAY_TELEGRAM", "").strip()
+
 # Секрет вебхука магазинного бота. Без него вебхук отвергает всё, и оплата
 # гарантированно не пройдёт: запрос перед списанием уйдёт в тайм-аут.
 # Поэтому без секрета оплата картой считается выключенной.
@@ -215,6 +224,8 @@ CONFIG_FIELDS = {
     "CLICK_SERVICE_ID": str, "CLICK_MERCHANT_ID": str, "CLICK_MERCHANT_USER_ID": str,
     "CLICK_SECRET_KEY": str, "CLICK_PILOT": lambda v: v != "0", "CLICK_TIN": str,
     "CLICK_DELIVERY_SPIC": str, "CLICK_DELIVERY_PACKAGE": str,
+    "REGOS_PAY_PAYME": str, "REGOS_PAY_CLICK": str, "REGOS_PAY_PAYNET": str,
+    "REGOS_PAY_TELEGRAM": str,
     "TEST_USERS": lambda v: {int(x) for x in v.replace(" ", "").split(",") if x.isdigit()},
     "TESTERS_ONLY": lambda v: v == "1",
 }
@@ -317,6 +328,13 @@ def config_view() -> dict:
         else:
             shown[name] = {"value": text, "source": source}
     return shown
+
+
+def regos_payment_type(provider: str | None) -> int | None:
+    """Форма оплаты REGOS для способа, если задана в панели или окружении."""
+    refresh()
+    value = str(globals().get(f"REGOS_PAY_{(provider or '').upper()}", "") or "")
+    return int(value) if value.isdigit() else None
 
 
 def providers_for(telegram_id: int | None) -> list[str]:
@@ -555,7 +573,9 @@ def worker() -> None:
         try:
             cancel_stale(db)
             from app import click
+            from app.regos import orders_push
             click.retry_fiscal(db)
+            orders_push.fiscal_qr_pending(db)
         except Exception:                       # noqa: BLE001
             # поток обязан пережить что угодно: иначе неоплаченные заказы
             # начнут копиться, а служба останется живой, и никто не заметит

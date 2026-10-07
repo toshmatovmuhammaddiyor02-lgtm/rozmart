@@ -82,7 +82,7 @@ def build_payload(order: Order, item_ids: dict[int, str],
         "address": order.address,
         "phone": order.phone,
         "description": _description(order),
-        "payment_type_id": config.PAYMENT_TYPE_IDS.get(order.payment_method, 0),
+        "payment_type_id": payment_type_id(order),
         # кассир видит срок доставки отдельным полем, а не только в описании
         "delivery_date": delivery_timestamp(order),
     }
@@ -93,6 +93,9 @@ def build_payload(order: Order, item_ids: dict[int, str],
         document["location"] = {"latitude": order.lat, "longitude": order.lon}
     if customer_id:
         document["customer_id"] = customer_id
+    if order.fiscal_qr_url:
+        # чек уже выдала платёжная система: касса второй не печатает
+        document["qrcodeurl"] = order.fiscal_qr_url
     if config.ORDER_DELIVERY_TYPE_ID:
         document["delivery_type_id"] = config.ORDER_DELIVERY_TYPE_ID
 
@@ -117,6 +120,21 @@ def build_payload(order: Order, item_ids: dict[int, str],
     return {"document": document, "operations": operations}
 
 
+# у оплаты внутри Telegram платёжную систему выбирает BotFather — название не пишем
+PROVIDER_TITLES = {"payme": "Payme", "click": "Click", "paynet": "Paynet"}
+
+
+def payment_type_id(order: Order) -> int:
+    """Форма оплаты в REGOS. Оплаченный онлайн — своя форма способа оплаты
+    (задаётся в панели: «ROZMART Payme» и т. п.), иначе — «онлайн» по умолчанию."""
+    if order.paid_at is not None and order.pay_provider:
+        from app import payments
+        own = payments.regos_payment_type(order.pay_provider)
+        if own:
+            return own
+    return config.PAYMENT_TYPE_IDS.get(order.payment_method, 0)
+
+
 def _description(order: Order) -> str:
     """Комментарий покупателя и срок доставки — оператору в REGOS они нужнее
     всего, а отдельных полей под них в документе нет.
@@ -128,8 +146,11 @@ def _description(order: Order) -> str:
     parts = []
     if order.paid_at is not None:
         from app import payments
-        parts.append("ТЕСТ! ОПЛАЧЕНО ОНЛАЙН (ТЕСТОВАЯ ОПЛАТА), ДЕНЬГИ НЕ БРАТЬ"
-                     if payments.is_test(order.pay_provider) else "ОПЛАЧЕНО ОНЛАЙН, ДЕНЬГИ НЕ БРАТЬ")
+        via = PROVIDER_TITLES.get(order.pay_provider or "", "")
+        via = f" ({via})" if via else ""
+        parts.append(f"ТЕСТ! ОПЛАЧЕНО ОНЛАЙН{via} (ТЕСТОВАЯ ОПЛАТА), ДЕНЬГИ НЕ БРАТЬ"
+                     if payments.is_test(order.pay_provider)
+                     else f"ОПЛАЧЕНО ОНЛАЙН{via}, ДЕНЬГИ НЕ БРАТЬ")
     parts += [f"ROZMART {order.number}", order.customer_name, order.delivery_slot]
     if order.comment:
         parts.append(order.comment.strip())
@@ -196,6 +217,10 @@ def push_order(client: RegosClient, order: Order, item_ids: dict[int, str]) -> i
 
     new_id = result["new_id"]
     log.info("Заказ %s выгружен в REGOS, документ %s", order.number, new_id)
+    if order.fiscal_qr_url:
+        # ссылка на чек ушла в самом документе — SetFiscalInfo уже не нужен
+        from app.models import utcnow
+        order.fiscal_qr_regos_at = utcnow()
 
     try:
         confirm(client, new_id)
@@ -503,6 +528,82 @@ def push_one(order_id: int) -> None:
         log.exception("Сбой автоотправки заказа %s", order_id)
     finally:
         db.close()
+
+
+# ------------------------------------------------- фискальный чек онлайн-оплаты
+
+# Сколько раз пробуем записать ссылку на чек в заказ REGOS. Не выходит, если
+# кассир уже провёл заказ (документ закрыт) — тогда чек напечатала касса,
+# и дальше стучаться незачем
+FISCAL_QR_TRIES = 10
+
+
+def send_fiscal_qr(order_id: int) -> None:
+    """Записывает в заказ REGOS ссылку на фискальный чек платёжной системы
+    (DocOrderDelivery/SetFiscalInfo): с ней касса заказ повторно не
+    фискализирует. Заказ ещё не выгружен — ссылка уйдёт при выгрузке."""
+    from app.db import SessionLocal
+    from app.models import Order, utcnow
+
+    db = SessionLocal()
+    try:
+        order = db.get(Order, order_id, with_for_update=True)
+        if (order is None or not order.fiscal_qr_url or not order.regos_document_id
+                or order.fiscal_qr_regos_at is not None
+                or order.fiscal_qr_regos_tries >= FISCAL_QR_TRIES
+                or not config.is_configured()):
+            return
+        order.fiscal_qr_regos_tries += 1
+        try:
+            RegosClient().call("DocOrderDelivery/SetFiscalInfo", {
+                "id": order.regos_document_id, "qrcodeurl": order.fiscal_qr_url})
+            order.fiscal_qr_regos_at = utcnow()
+            order.fiscal_qr_regos_error = None
+            log.info("Заказ %s: ссылка на чек передана в REGOS", order.number)
+        except (RegosError, RuntimeError, OSError) as exc:
+            order.fiscal_qr_regos_error = str(exc)[:500]
+            log.warning("Заказ %s: ссылка на чек не передана в REGOS: %s", order.number, exc)
+        db.commit()
+    except Exception:                       # noqa: BLE001
+        db.rollback()
+        log.exception("Сбой передачи чека в REGOS по заказу %s", order_id)
+    finally:
+        db.close()
+
+
+def fiscal_qr_pending(db) -> None:
+    """Повторяет передачу ссылок на чек, которые не ушли сразу."""
+    from datetime import timedelta
+
+    from sqlalchemy import select
+
+    from app.models import Order, utcnow
+
+    ids = db.scalars(select(Order.id).where(
+        Order.fiscal_qr_url.is_not(None),
+        Order.regos_document_id.is_not(None),
+        Order.fiscal_qr_regos_at.is_(None),
+        Order.fiscal_qr_regos_tries < FISCAL_QR_TRIES,
+        Order.paid_at > utcnow() - timedelta(days=2),
+    )).all()
+    for order_id in ids:
+        send_fiscal_qr(order_id)
+
+
+def set_fiscal_qr(db, order, url: str, background=None) -> None:
+    """Платёжная система выдала чек: запоминаем ссылку у заказа и, если
+    заказ уже в REGOS, передаём её туда. Коммит — здесь."""
+    if not url or order is None or order.fiscal_qr_url == url:
+        return
+    order.fiscal_qr_url = url
+    order.fiscal_qr_regos_at = None
+    order.fiscal_qr_regos_tries = 0
+    db.commit()
+    if order.regos_document_id:
+        if background is not None:
+            background.add_task(send_fiscal_qr, order.id)
+        else:
+            send_fiscal_qr(order.id)
 
 
 # --------------------------------------------------------------- отмена заказа

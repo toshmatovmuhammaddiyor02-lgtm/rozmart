@@ -262,6 +262,13 @@ class Order(Base):
     regos_document_id: Mapped[int | None] = mapped_column(index=True)
     regos_error: Mapped[str | None] = mapped_column(Text)
     regos_attempts: Mapped[int] = mapped_column(default=0, server_default="0")
+    # Фискальный чек онлайн-оплаты: его выдаёт платёжная система (Payme, Click).
+    # Ссылку передаём в заказ REGOS, чтобы касса не печатала второй чек
+    # на ту же продажу. regos_at — когда REGOS ссылку принял
+    fiscal_qr_url: Mapped[str | None] = mapped_column(Text)
+    fiscal_qr_regos_at: Mapped[datetime | None] = mapped_column(DateTime)
+    fiscal_qr_regos_error: Mapped[str | None] = mapped_column(Text)
+    fiscal_qr_regos_tries: Mapped[int] = mapped_column(default=0, server_default="0")
 
     items: Mapped[list["OrderItem"]] = relationship(
         back_populates="order", cascade="all, delete-orphan"

@@ -567,11 +567,17 @@
     });
   }
 
+  // форма оплаты, с которой заказ приходит на кассу REGOS: кассиру остаётся
+  // «Закрыть чек». Не выбрана — «Пласт. карта»
+  var REGOS_HINT = 'С ней оплаченный заказ приходит на кассу. Не выбрано — «Пласт. карта»';
+  var regosTypes = [];
+
   // поля каждого способа: [имя настройки, подпись, вид, подсказка]
   var PAY_FIELDS = {
     payme: [
       ['PAYME_MERCHANT_ID', 'ID кассы', 'masked', '24 символа, из кабинета Payme Business'],
       ['PAYME_KEY', 'Ключ кассы', 'secret', 'Боевой или тестовый — смотря по режиму ниже'],
+      ['REGOS_PAY_PAYME', 'Форма оплаты в REGOS', 'regos', REGOS_HINT],
       ['PAYME_TEST', 'Тестовый режим (песочница Payme)', 'bool',
        'Выключено — настоящие деньги']
     ],
@@ -581,6 +587,7 @@
       ['PAYNET_PASSWORD', 'Пароль', 'secret', 'Задаём сами и передаём Paynet лично, не в группу'],
       ['PAYNET_PAY_URL', 'Ссылка на оплату в Paynet', 'text',
        'Если Paynet даст: {service}, {order}, {amount}. Пусто — покупатель вводит номер сам'],
+      ['REGOS_PAY_PAYNET', 'Форма оплаты в REGOS', 'regos', REGOS_HINT],
       ['PAYNET_TEST', 'Тестовый режим', 'bool', 'Выключено — настоящие деньги']
     ],
     click: [
@@ -591,6 +598,7 @@
       ['CLICK_TIN', 'ИНН продавца', 'text', 'Для чека: 9 цифр'],
       ['CLICK_DELIVERY_SPIC', 'ИКПУ доставки', 'text', 'Для чека, если доставка платная: 17 цифр'],
       ['CLICK_DELIVERY_PACKAGE', 'Код упаковки доставки', 'text', 'Для чека, если доставка платная'],
+      ['REGOS_PAY_CLICK', 'Форма оплаты в REGOS', 'regos', REGOS_HINT],
       ['CLICK_PILOT', 'Пилот: видят только тестировщики', 'bool',
        'Тестовой среды у Click нет — платежи всегда настоящие. Выключите, чтобы открыть всем']
     ]
@@ -606,6 +614,25 @@
     f.appendChild(label);
     var input = document.createElement('input');
     input.dataset.name = name;
+    if (kind === 'regos') {
+      var sel = document.createElement('select');
+      sel.dataset.name = name;
+      var current = c.value || '';
+      var opts = [['', 'Пласт. карта (по умолчанию)']].concat(regosTypes.filter(function (t) {
+        return !t.cash;
+      }).map(function (t) { return [String(t.id), t.name + ' (№' + t.id + ')']; }));
+      if (current && !opts.some(function (o) { return o[0] === current; })) {
+        opts.push([current, '№' + current + ' — нет в списке REGOS']);
+      }
+      opts.forEach(function (o) {
+        var op = document.createElement('option');
+        op.value = o[0]; op.textContent = o[1]; op.selected = o[0] === current;
+        sel.appendChild(op);
+      });
+      f.appendChild(sel);
+      if (hint) f.appendChild(el('div', 'hint', hint));
+      return f;
+    }
     if (kind === 'bool') {
       var wrap = el('label', 'sw');
       input.type = 'checkbox';
@@ -642,6 +669,9 @@
 
   function collect(card) {
     var values = {};
+    card.querySelectorAll('select[data-name]').forEach(function (s) {
+      values[s.dataset.name] = s.value;
+    });
     card.querySelectorAll('input[data-name]').forEach(function (i) {
       if (i.dataset.kind === 'bool') values[i.dataset.name] = i.checked ? '1' : '0';
       else if (i.dataset.kind === 'secret') { if (i.value.trim()) values[i.dataset.name] = i.value.trim(); }
@@ -698,6 +728,7 @@
     var box = document.getElementById('payCards');
     box.innerHTML = '';
     var cfg = data.config || {};
+    regosTypes = data.regos_payment_types || [];
     data.providers.forEach(function (p) {
       var card = el('div', 'pcard');
       var hd = el('div', 'pcard-hd');

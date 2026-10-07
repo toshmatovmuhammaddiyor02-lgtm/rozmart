@@ -24,7 +24,9 @@ Complete по документации Click обязан ответить «у�
 
 Чек в налоговую (фискализация) — тоже на нас: после оплаты отправляем
 состав чека (ИКПУ, код упаковки, НДС) методом ofd_data/submit_items. Не
-принят — пробуем ещё несколько раз в фоне (`retry_fiscal`).
+принят — пробуем ещё несколько раз в фоне (`retry_fiscal`). Принятый чек
+налоговая регистрирует не сразу: ссылку на него (QR) забираем у Click, пока
+не появится, и передаём в заказ REGOS — касса второй чек не печатает.
 """
 import hashlib
 import hmac
@@ -70,6 +72,9 @@ AMOUNT_SCALE = 1000
 # Сколько раз пробуем отправить чек и с каким шагом
 FISCAL_ATTEMPTS = 5
 FISCAL_STEP = timedelta(minutes=10)
+# Сколько ждём ссылку на чек после оплаты: кассир берёт заказ через минуты,
+# и позже ссылка ему уже не поможет — чек напечатает касса
+QR_WAIT = timedelta(minutes=30)
 
 # коды ошибок — из документации Click (SHOP API — Ошибки)
 NOTES = {
@@ -395,11 +400,29 @@ def fiscalize(tx_id: int) -> None:
         db.commit()
         (log.info if ok else log.error)("Чек Click по заказу %s: %s", tx.order_number,
                                         tx.fiscal_note)
+        if ok:
+            fetch_qr(db, tx, order)
     except Exception:                           # noqa: BLE001
         db.rollback()
         log.exception("Чек Click: сбой")
     finally:
         db.close()
+
+
+def fetch_qr(db: Session, tx: ClickTransaction, order: Order) -> None:
+    """Забирает у Click ссылку на зарегистрированный чек и передаёт её
+    в заказ REGOS. Нет ещё — не беда, `retry_fiscal` спросит снова."""
+    try:
+        result = api("GET", f"/payment/ofd_data/{payments.CLICK_SERVICE_ID}/{tx.click_paydoc_id}")
+    except Exception as exc:                    # noqa: BLE001
+        log.info("Чек Click по заказу %s: ссылки пока нет (%s)", tx.order_number, exc)
+        return
+    url = str(result.get("qrCodeURL") or "").strip()
+    if not url:
+        return
+    log.info("Чек Click по заказу %s зарегистрирован: %s", tx.order_number, url)
+    from app.regos.orders_push import set_fiscal_qr
+    set_fiscal_qr(db, order, url)
 
 
 def retry_fiscal(db: Session) -> None:
@@ -417,6 +440,17 @@ def retry_fiscal(db: Session) -> None:
         tx = db.get(ClickTransaction, tx_id)
         if tx.fiscal_at is None or tx.fiscal_at < now - FISCAL_STEP * tx.fiscal_attempts:
             fiscalize(tx_id)
+
+    # чек принят, а ссылки на него ещё нет — спрашиваем, пока ждать есть смысл
+    waiting = db.execute(select(ClickTransaction, Order).join(
+        Order, Order.id == ClickTransaction.order_id).where(
+        ClickTransaction.state == COMPLETED,
+        ClickTransaction.fiscal_status == "ok",
+        ClickTransaction.completed_at > now - QR_WAIT,
+        Order.fiscal_qr_url.is_(None),
+    )).all()
+    for tx, order in waiting:
+        fetch_qr(db, tx, order)
 
 
 def reverse(tx_id: int) -> None:
