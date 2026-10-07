@@ -124,7 +124,8 @@ def whoami(
                 "name": account.full_name or account.username, "via": "password",
                 "username": account.username, "role": role,
                 "role_title": admin_auth.ROLES.get(role, {}).get("title", "нет роли"),
-                "sections": admin_auth.sections_of(role)}
+                "sections": admin_auth.sections_of(role),
+                "min_password": admin_auth.MIN_PASSWORD}
     if user is None:
         return {"authorized": False, "admin": telegram.AUTH_DISABLED, "id": None,
                 "hint": "Войдите по логину или откройте панель из Telegram",

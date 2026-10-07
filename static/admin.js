@@ -974,7 +974,8 @@
     var body = document.getElementById('paneBody');
     body.innerHTML = '';
     body.appendChild(passField('Текущий пароль', 'mpCur'));
-    body.appendChild(passField('Новый пароль', 'mpNew', 'Не короче 10 символов'));
+    body.appendChild(passField('Новый пароль', 'mpNew',
+      'Не короче ' + ((state.me && state.me.min_password) || 5) + ' символов'));
     body.appendChild(passField('Новый пароль ещё раз', 'mpNew2'));
     body.appendChild(el('p', 'meta', 'Панель на других устройствах закроется, здесь вы останетесь.'));
     var foot = document.getElementById('paneFoot');

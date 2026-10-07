@@ -85,12 +85,14 @@ check(1, "Список пользователей и ролей", [u["username"]
       and {x["role"] for x in r["roles"]} == {"admin", "manager", "accountant", "operator"})
 
 # ------------------------------------------------------------ завести пользователя
-new = {"username": "Tovaroved", "full_name": "Товаровед", "role": "manager", "password": "short"}
-check(2, "Короткий пароль — нельзя", boss.post("/api/admin/users", json=new).status_code == 400)
+new = {"username": "Tovaroved", "full_name": "Товаровед", "role": "manager", "password": "1234"}
+check(2, "Пароль короче 5 символов — нельзя", boss.post("/api/admin/users", json=new).status_code == 400)
 check(2, "Кривой логин — нельзя", boss.post("/api/admin/users", json={
     **new, "username": "то вар", "password": "x" * 12}).status_code == 400)
 check(2, "Неизвестная роль — нельзя", boss.post("/api/admin/users", json={
     **new, "role": "god", "password": "x" * 12}).status_code == 400)
+check(2, "Пароль из 5 символов — можно", boss.post("/api/admin/users", json={
+    **new, "username": "five", "password": "12345", "role": "operator"}).status_code == 200)
 r = boss.post("/api/admin/users", json={**new, "password": "Tovar-pass-2026"})
 check(2, "Товаровед заведён (логин — строчными)", r.status_code == 200 and any(
     u["username"] == "tovaroved" and u["role"] == "manager" for u in r.json()["users"]), r.text[:200])
