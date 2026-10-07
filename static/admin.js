@@ -60,7 +60,9 @@
   // ------------------------------------------------------------------ товары
 
   function loadProducts() {
-    var url = '/products?status=' + state.status + '&limit=200';
+    // с поиском — по всем товарам: ищут обычно по названию или коду и не
+    // помнят, опубликован товар или нет. Вкладка снова действует, когда поле пустое
+    var url = '/products?status=' + (state.q ? 'all' : state.status) + '&limit=200';
     if (state.q) url += '&q=' + encodeURIComponent(state.q);
     if (state.category) url += '&category_id=' + state.category;
     api(url).then(renderProducts).catch(function (e) { say(e.message); });
@@ -77,8 +79,11 @@
     if (at) {
       at.textContent = 'обновлено в ' + new Date().toLocaleTimeString('ru-RU',
         { hour: '2-digit', minute: '2-digit', second: '2-digit' }) +
-        ' · товаров ' + rows.length;
+        ' · товаров ' + rows.length + (state.q ? ' · поиск по всем вкладкам' : '');
     }
+    document.querySelectorAll('.tab[data-status]').forEach(function (t) {
+      t.style.opacity = state.q ? '.45' : '';
+    });
 
     if (!rows.length) {
       box.appendChild(el('div', 'empty', 'Ничего не найдено'));
