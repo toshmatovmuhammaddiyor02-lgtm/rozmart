@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, Request
 from fastapi.exception_handlers import http_exception_handler
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.admin import router as admin_router
@@ -133,6 +133,13 @@ def admin_page(request: Request, db: Session = Depends(get_db)):
         html.replace("__V__", str(version)),
         headers={"Cache-Control": "no-store"},
     )
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    """Иконка вкладки: браузер ищет её в корне сайта сам, на любой странице."""
+    return FileResponse(STATIC_DIR / "icons" / "favicon.ico", media_type="image/x-icon",
+                        headers={"Cache-Control": "public, max-age=86400"})
 
 
 @app.get("/admin/login", include_in_schema=False)
