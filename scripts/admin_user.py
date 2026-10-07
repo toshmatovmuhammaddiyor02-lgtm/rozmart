@@ -15,7 +15,7 @@ import sys
 
 from sqlalchemy import select
 
-from app.admin_auth import MIN_PASSWORD, drop_sessions, hash_password
+from app.admin_auth import MIN_PASSWORD, ROLES, drop_sessions, hash_password
 from app.db import SessionLocal, init_db
 from app.models import AdminUser
 
@@ -39,6 +39,8 @@ def main() -> int:
         p.add_argument("username")
         if name == "add":
             p.add_argument("--name", default=None, help="имя для показа в панели")
+            p.add_argument("--role", default="admin", choices=sorted(ROLES),
+                           help="роль: что видно в панели (по умолчанию admin)")
     sub.add_parser("list")
     args = parser.parse_args()
 
@@ -51,7 +53,7 @@ def main() -> int:
                 print("Учётных записей нет.")
             for u in rows:
                 print(f"  {u.username:20} {'активна' if u.is_active else 'отключена':10} "
-                      f"{u.full_name or ''}")
+                      f"{u.role:11} {u.full_name or ''}")
             return 0
 
         username = args.username.strip().lower()
@@ -65,7 +67,7 @@ def main() -> int:
             if password is None:
                 return 1
             db.add(AdminUser(username=username, password_hash=hash_password(password),
-                             full_name=args.name))
+                             full_name=args.name, role=args.role))
             db.commit()
             print(f"Заведена учётная запись {username}.")
             return 0

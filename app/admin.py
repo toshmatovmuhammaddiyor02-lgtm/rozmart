@@ -55,6 +55,7 @@ PHOTO_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 
 
 def require_admin(
+    request: Request,
     user: TelegramUser | None = Depends(current_user),
     account: AdminUser | None = Depends(admin_auth.session_user),
 ) -> TelegramUser:
@@ -68,8 +69,14 @@ def require_admin(
     машине ни Telegram, ни заведённых учёток нет. Переменная задаётся явно,
     а без неё приложение вообще откажется стартовать без токена бота, так что
     случайно открытой на сервере эта дверь не окажется.
+
+    Роль. Вошедший по паролю видит только разделы своей роли
+    (admin_auth.ROLES): адрес запроса относится к разделу, и чужой раздел —
+    403. Вошедшие через Telegram из ADMIN_TELEGRAM_IDS — администраторы.
     """
     if account is not None:
+        if not admin_auth.allowed(account.role, request.method, request.url.path):
+            raise HTTPException(status_code=403, detail="Этот раздел вашей роли недоступен")
         return TelegramUser(id=0, name=account.full_name or account.username)
     if telegram.AUTH_DISABLED:
         return user or TelegramUser(id=0, name="разработка")
@@ -112,13 +119,21 @@ def whoami(
     не заполнить. Ничего чужого метод не сообщает — только ваш собственный id.
     """
     if account is not None:
+        role = account.role if account.role in admin_auth.ROLES else ""
         return {"authorized": True, "admin": True, "id": None,
-                "name": account.full_name or account.username, "via": "password"}
+                "name": account.full_name or account.username, "via": "password",
+                "username": account.username, "role": role,
+                "role_title": admin_auth.ROLES.get(role, {}).get("title", "нет роли"),
+                "sections": admin_auth.sections_of(role)}
     if user is None:
         return {"authorized": False, "admin": telegram.AUTH_DISABLED, "id": None,
-                "hint": "Войдите по логину или откройте панель из Telegram"}
-    return {"authorized": True, "admin": user.id in ADMIN_IDS or telegram.AUTH_DISABLED,
-            "id": user.id, "name": user.name, "via": "telegram"}
+                "hint": "Войдите по логину или откройте панель из Telegram",
+                "sections": list(admin_auth.SECTIONS) if telegram.AUTH_DISABLED else []}
+    admin = user.id in ADMIN_IDS or telegram.AUTH_DISABLED
+    return {"authorized": True, "admin": admin,
+            "id": user.id, "name": user.name, "via": "telegram",
+            "role": "admin" if admin else "", "role_title": "Администратор" if admin else "",
+            "sections": list(admin_auth.SECTIONS) if admin else []}
 
 
 # ---------------------------------------------------------------- модели ответа

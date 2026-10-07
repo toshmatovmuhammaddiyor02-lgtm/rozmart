@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.admin import router as admin_router
+from app.admin_users import router as admin_users_router
 from app import admin_auth, notify, payments
 from app.bot import router as bot_router
 from app.catalog import router as catalog_router
@@ -83,6 +84,7 @@ async def localized_http_exception(request: Request, exc: StarletteHTTPException
     return await http_exception_handler(request, exc)
 
 app.include_router(admin_router)
+app.include_router(admin_users_router)
 app.include_router(bot_router)
 app.include_router(catalog_router)
 app.include_router(courier_router)

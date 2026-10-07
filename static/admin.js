@@ -800,6 +800,202 @@
     box.appendChild(common);
   }
 
+  // --------------------------------------------------- пользователи и роли
+
+  var usersState = { roles: [], min: 10 };
+
+  // пароль из 14 символов без похожих букв (l/1, O/0) — его диктуют и переписывают
+  function makePassword() {
+    var abc = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    var out = '';
+    var buf = new Uint32Array(14);
+    window.crypto.getRandomValues(buf);
+    for (var i = 0; i < buf.length; i++) out += abc[buf[i] % abc.length];
+    return out;
+  }
+
+  function roleSelect(current) {
+    var sel = document.createElement('select');
+    usersState.roles.forEach(function (r) {
+      var o = document.createElement('option');
+      o.value = r.role; o.textContent = r.title; o.selected = r.role === current;
+      sel.appendChild(o);
+    });
+    if (!current) {
+      var none = document.createElement('option');
+      none.value = ''; none.textContent = 'нет роли'; none.selected = true;
+      sel.insertBefore(none, sel.firstChild);
+    }
+    return sel;
+  }
+
+  function loadUsers() {
+    api('/users').then(renderUsers).catch(function (e) { say(e.message); });
+  }
+
+  function patchUser(username, body, okText) {
+    return api('/users/' + encodeURIComponent(username), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(function (r) { say(okText, 'ok'); renderUsers(r); })
+      .catch(function (e) { say(e.message); loadUsers(); });
+  }
+
+  function renderUsers(r) {
+    usersState.roles = r.roles;
+    usersState.min = r.min_password;
+    var me = state.me || {};
+    var t = document.getElementById('usersTable');
+    t.innerHTML = '';
+    headRow(t, [['Логин'], ['Имя'], ['Роль'], ['Состояние'], ['Сейчас вошёл'], ['']]);
+    r.users.forEach(function (u) {
+      var tr = document.createElement('tr');
+      cell(tr, u.username + (u.username === me.username ? ' (вы)' : ''));
+      cell(tr, u.full_name || '—');
+      var sel = roleSelect(u.role);
+      sel.onchange = function () {
+        if (!confirm('Сменить роль «' + u.username + '» на «' + sel.options[sel.selectedIndex].text
+            + '»? Пользователю нужно будет войти заново.')) { sel.value = u.role; return; }
+        patchUser(u.username, { role: sel.value }, 'Роль изменена');
+      };
+      cell(tr, '').appendChild(sel);
+      cell(tr, '').appendChild(el('span', 'pill ' + (u.is_active ? 'ok' : 'no'),
+                                  u.is_active ? 'действует' : 'отключён'));
+      cell(tr, u.sessions ? 'да' : 'нет');
+      var acts = cell(tr, '');
+      var pass = el('button', 'act ghost', 'Новый пароль');
+      pass.onclick = function () { openPasswordPane(u); };
+      acts.appendChild(pass);
+      var tog = el('button', 'act ' + (u.is_active ? 'ghost' : 'blue'),
+                   u.is_active ? 'Отключить' : 'Включить');
+      tog.onclick = function () {
+        if (u.is_active && !confirm('Отключить «' + u.username + '»? Войти он больше не сможет, '
+            + 'открытая панель закроется.')) return;
+        patchUser(u.username, { is_active: !u.is_active },
+                  u.is_active ? 'Пользователь отключён' : 'Пользователь включён');
+      };
+      acts.appendChild(tog);
+      t.appendChild(tr);
+    });
+
+    var nr = document.getElementById('nuRole');
+    if (!nr.options.length) {
+      r.roles.forEach(function (x) {
+        var o = document.createElement('option');
+        o.value = x.role; o.textContent = x.title; o.selected = x.role === 'manager';
+        nr.appendChild(o);
+      });
+    }
+    document.getElementById('nuHint').textContent = 'Не короче ' + r.min_password
+      + ' символов. Передайте пароль человеку лично, не в общий чат.';
+
+    var info = document.getElementById('rolesInfo');
+    info.innerHTML = '';
+    r.roles.forEach(function (x) {
+      var d = el('div', 'rolerow');
+      d.appendChild(el('b', null, x.title + ': '));
+      d.appendChild(document.createTextNode(x.sections.join(', ')));
+      info.appendChild(d);
+    });
+  }
+
+  document.getElementById('nuGen').onclick = function () {
+    var f = document.getElementById('nuPass');
+    f.value = makePassword();
+    f.type = 'text';
+  };
+  document.getElementById('nuCreate').onclick = function (e) {
+    var body = {
+      username: document.getElementById('nuLogin').value.trim().toLowerCase(),
+      full_name: document.getElementById('nuName').value.trim(),
+      role: document.getElementById('nuRole').value,
+      password: document.getElementById('nuPass').value
+    };
+    e.target.disabled = true;
+    api('/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(function (r) {
+      say('Пользователь «' + body.username + '» создан. Передайте ему логин и пароль лично.', 'ok');
+      ['nuLogin', 'nuName', 'nuPass'].forEach(function (id) { document.getElementById(id).value = ''; });
+      renderUsers(r);
+    }).catch(function (err) { say(err.message); })
+      .then(function () { e.target.disabled = false; });
+  };
+
+  function passField(label, id, hint) {
+    var f = el('div', 'fld');
+    f.appendChild(el('label', null, label));
+    var i = document.createElement('input');
+    i.type = 'password'; i.id = id; i.autocomplete = 'new-password'; i.spellcheck = false;
+    f.appendChild(i);
+    if (hint) f.appendChild(el('div', 'hint', hint));
+    return f;
+  }
+
+  // новый пароль другому пользователю (только администратор)
+  function openPasswordPane(u) {
+    document.getElementById('paneTtl').textContent = 'Новый пароль: ' + u.username;
+    var body = document.getElementById('paneBody');
+    body.innerHTML = '';
+    body.appendChild(el('p', 'meta', 'Старый пароль перестанет работать, открытые сессии '
+      + 'пользователя закроются. Передайте новый пароль лично.'));
+    var f = passField('Новый пароль', 'rpPass', 'Не короче ' + usersState.min + ' символов');
+    var gen = el('button', 'act ghost', 'Придумать');
+    gen.style.marginTop = '6px';
+    gen.onclick = function () {
+      var i = document.getElementById('rpPass');
+      i.value = makePassword(); i.type = 'text';
+    };
+    f.appendChild(gen);
+    body.appendChild(f);
+    var foot = document.getElementById('paneFoot');
+    foot.innerHTML = '';
+    var save = el('button', 'act', 'Сохранить пароль');
+    save.onclick = function () {
+      save.disabled = true;
+      api('/users/' + encodeURIComponent(u.username) + '/password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: document.getElementById('rpPass').value })
+      }).then(function () {
+        closePane(); say('Пароль «' + u.username + '» изменён', 'ok'); loadUsers();
+      }).catch(function (e) { say(e.message); save.disabled = false; });
+    };
+    foot.appendChild(save);
+    openPane();
+  }
+
+  // свой пароль — любой вошедший по логину
+  document.getElementById('myPass').onclick = function () {
+    document.getElementById('paneTtl').textContent = 'Сменить пароль';
+    var body = document.getElementById('paneBody');
+    body.innerHTML = '';
+    body.appendChild(passField('Текущий пароль', 'mpCur'));
+    body.appendChild(passField('Новый пароль', 'mpNew', 'Не короче 10 символов'));
+    body.appendChild(passField('Новый пароль ещё раз', 'mpNew2'));
+    body.appendChild(el('p', 'meta', 'Панель на других устройствах закроется, здесь вы останетесь.'));
+    var foot = document.getElementById('paneFoot');
+    foot.innerHTML = '';
+    var save = el('button', 'act', 'Сменить пароль');
+    save.onclick = function () {
+      var cur = document.getElementById('mpCur').value;
+      var a = document.getElementById('mpNew').value;
+      if (a !== document.getElementById('mpNew2').value) { say('Новые пароли не совпадают'); return; }
+      save.disabled = true;
+      api('/me/password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ current: cur, password: a })
+      }).then(function () { closePane(); say('Пароль изменён', 'ok'); })
+        .catch(function (e) { say(e.message); save.disabled = false; });
+    };
+    foot.appendChild(save);
+    openPane();
+  };
+
   // --------------------------------------------------- онлайн-платежи: отчёт
 
   function isoDay(d) {
@@ -1379,19 +1575,26 @@
     document.getElementById('ovl').classList.remove('on');
   }
 
+  // разделы, доступные роли вошедшего (из /whoami); порядок — как в меню
+  var ORDER_OF_VIEWS = ['products', 'orders', 'report', 'settings', 'payments', 'users'];
+  var allowedViews = ORDER_OF_VIEWS.slice();
+
   function show(view) {
+    if (allowedViews.indexOf(view) < 0) view = allowedViews[0];
+    if (!view) return;
     state.view = view;
     document.getElementById('viewProducts').hidden = view !== 'products';
     document.getElementById('viewOrders').hidden = view !== 'orders';
     document.getElementById('viewSettings').hidden = view !== 'settings';
     document.getElementById('viewPayments').hidden = view !== 'payments';
     document.getElementById('viewReport').hidden = view !== 'report';
+    document.getElementById('viewUsers').hidden = view !== 'users';
     document.getElementById('q').hidden = view === 'settings' || view === 'payments'
-      || view === 'report';
+      || view === 'report' || view === 'users';
     document.getElementById('ttl').textContent =
       { products: 'Категории и товары', orders: 'Заказы',
         settings: 'Состав каталога', payments: 'Онлайн оплата',
-        report: 'Онлайн-платежи' }[view];
+        report: 'Онлайн-платежи', users: 'Пользователи' }[view];
     document.querySelectorAll('.nav').forEach(function (n) {
       n.classList.toggle('on', n.dataset.go === view);
     });
@@ -1400,6 +1603,7 @@
     else if (view === 'orders') loadOrders();
     else if (view === 'payments') loadPaySwitches();
     else if (view === 'report') loadReport();
+    else if (view === 'users') loadUsers();
     else loadSettings();
   }
 
@@ -1469,21 +1673,33 @@
   // Кто вошёл и чем выйти. В Telegram выхода нет: там сессии не заводится,
   // вход подтверждается подписью при каждом запросе.
   api('/whoami', { quiet: true }).then(function (me) {
-    document.getElementById('who').textContent = me.name || '';
+    state.me = me;
+    document.getElementById('who').textContent = (me.name || '')
+      + (me.role_title ? ' · ' + me.role_title : '');
+    if (me.sections) {
+      allowedViews = ORDER_OF_VIEWS.filter(function (v) { return me.sections.indexOf(v) >= 0; });
+    }
+    document.querySelectorAll('.nav').forEach(function (n) {
+      n.hidden = allowedViews.indexOf(n.dataset.go) < 0;
+    });
     var out = document.getElementById('logout');
-    if (me.via !== 'password') { out.hidden = true; return; }
-    out.onclick = function () {
-      api('/logout', { method: 'POST' })
-        .then(function () { location.href = '/admin/login'; })
-        .catch(function () { location.href = '/admin/login'; });
-    };
-  }).catch(function () {});
-
-  api('/statuses').then(function (s) {
+    if (me.via !== 'password') {
+      out.hidden = true;
+    } else {
+      document.getElementById('myPass').hidden = false;
+      out.onclick = function () {
+        api('/logout', { method: 'POST' })
+          .then(function () { location.href = '/admin/login'; })
+          .catch(function () { location.href = '/admin/login'; });
+      };
+    }
+    return api('/statuses');
+  }).then(function (s) {
     state.statuses = s.statuses;
     state.transitions = s.transitions;
     renderOrderTabs();
-    loadCategoryFilter();
-    show('products');
+    if (allowedViews.indexOf('products') >= 0) loadCategoryFilter();
+    if (!allowedViews.length) { denied('Вашей роли не доступен ни один раздел.'); return; }
+    show(allowedViews[0]);
   }).catch(function (e) { denied(e.message); });
 })();

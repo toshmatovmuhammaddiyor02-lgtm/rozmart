@@ -169,3 +169,68 @@ def purge_expired(db: Session) -> int:
         db.delete(row)
     db.commit()
     return len(rows)
+
+
+# ---------------------------------------------------------------- роли
+
+# Разделы панели. Каждый адрес /api/admin/... относится к одному из них
+# (section_of), и роль пользователя решает, в какие разделы ему можно.
+SECTIONS = {
+    "products": "Товары",
+    "orders": "Заказы",
+    "settings": "Состав каталога",
+    "payments": "Онлайн оплата",
+    "report": "Онлайн-платежи",
+    "users": "Пользователи",
+}
+
+# «Онлайн оплата» (ключи касс) и «Пользователи» — только администратору:
+# ключ кассы — это деньги, а учётки — это доступ ко всему остальному
+ROLES = {
+    "admin": {"title": "Администратор", "sections": list(SECTIONS)},
+    "manager": {"title": "Товаровед", "sections": ["products", "orders", "settings", "report"]},
+    "accountant": {"title": "Бухгалтер", "sections": ["orders", "report"]},
+    "operator": {"title": "Оператор заказов", "sections": ["orders"]},
+}
+
+# Адрес -> раздел. Порядок важен: /online-payments раньше /payments.
+# None — доступно любому вошедшему (кто я, справочники для отрисовки).
+_RULES = [
+    ("/online-payments", "report"),
+    ("/payments", "payments"),
+    ("/users", "users"),
+    ("/me", None),
+    ("/whoami", None),
+    ("/statuses", None),
+    ("/orders", "orders"),
+    ("/products", "products"),
+    ("/variants", "products"),
+    ("/regos", "settings"),
+    ("/notify", "settings"),
+    ("/couriers", "settings"),
+    ("/delivery-price", "settings"),
+    ("/cleanup", "settings"),
+]
+
+
+def section_of(method: str, path: str) -> str | None:
+    """Раздел, к которому относится запрос. Незнакомый адрес — «users»:
+    то есть только администратору. Новый метод, который забыли сюда
+    вписать, закрыт, а не открыт всем."""
+    rest = path.split("/api/admin", 1)[-1] or "/"
+    if rest.startswith("/categories"):
+        # список категорий нужен и товарам, и составу каталога; менять — каталог
+        return None if method == "GET" else "settings"
+    for prefix, section in _RULES:
+        if rest == prefix or rest.startswith(prefix + "/") or rest.startswith(prefix + "."):
+            return section
+    return "users"
+
+
+def sections_of(role: str | None) -> list[str]:
+    return list((ROLES.get(role or "") or {"sections": []})["sections"])
+
+
+def allowed(role: str | None, method: str, path: str) -> bool:
+    section = section_of(method, path)
+    return section is None or section in sections_of(role)

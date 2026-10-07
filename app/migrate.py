@@ -62,6 +62,8 @@ COLUMNS = [
     # фискальный чек из SetFiscalData
     ("payme_transactions", "fiscal_qr_url", "TEXT"),
     ("payme_transactions", "fiscal_data", "TEXT"),
+    # роли пользователей панели; заведённые раньше — администраторы
+    ("admin_users", "role", "VARCHAR(20) DEFAULT 'admin' NOT NULL"),
     # фискальный чек онлайн-оплаты — в заказ REGOS, чтобы касса не печатала второй
     ("orders", "fiscal_qr_url", "TEXT"),
     ("orders", "fiscal_qr_regos_at", "TIMESTAMP"),

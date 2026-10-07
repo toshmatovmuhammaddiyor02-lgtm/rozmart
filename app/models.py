@@ -98,6 +98,9 @@ class AdminUser(Base):
     full_name: Mapped[str | None] = mapped_column(String(120))
     is_active: Mapped[bool] = mapped_column(default=True, server_default="1")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    # роль задаёт, какие разделы панели доступны: app/admin_auth.py, ROLES.
+    # Заведённые до ролей учётки — администраторы, как и были
+    role: Mapped[str] = mapped_column(String(20), default="admin", server_default="admin")
 
 
 class AdminSession(Base):
