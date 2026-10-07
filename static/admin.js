@@ -578,6 +578,7 @@
       ['PAYME_MERCHANT_ID', 'ID кассы', 'masked', '24 символа, из кабинета Payme Business'],
       ['PAYME_KEY', 'Ключ кассы', 'secret', 'Боевой или тестовый — смотря по режиму ниже'],
       ['REGOS_PAY_PAYME', 'Форма оплаты в REGOS', 'regos', REGOS_HINT],
+      ['FEE_PAYME', 'Комиссия, %', 'text', 'По договору. Для отчёта «Онлайн-платежи»'],
       ['PAYME_TEST', 'Тестовый режим (песочница Payme)', 'bool',
        'Выключено — настоящие деньги']
     ],
@@ -588,6 +589,7 @@
       ['PAYNET_PAY_URL', 'Ссылка на оплату в Paynet', 'text',
        'Если Paynet даст: {service}, {order}, {amount}. Пусто — покупатель вводит номер сам'],
       ['REGOS_PAY_PAYNET', 'Форма оплаты в REGOS', 'regos', REGOS_HINT],
+      ['FEE_PAYNET', 'Комиссия, %', 'text', 'По договору. Для отчёта «Онлайн-платежи»'],
       ['PAYNET_TEST', 'Тестовый режим', 'bool', 'Выключено — настоящие деньги']
     ],
     click: [
@@ -599,6 +601,7 @@
       ['CLICK_DELIVERY_SPIC', 'ИКПУ доставки', 'text', 'Для чека, если доставка платная: 17 цифр'],
       ['CLICK_DELIVERY_PACKAGE', 'Код упаковки доставки', 'text', 'Для чека, если доставка платная'],
       ['REGOS_PAY_CLICK', 'Форма оплаты в REGOS', 'regos', REGOS_HINT],
+      ['FEE_CLICK', 'Комиссия, %', 'text', 'По договору. Для отчёта «Онлайн-платежи»'],
       ['CLICK_PILOT', 'Пилот: видят только тестировщики', 'bool',
        'Тестовой среды у Click нет — платежи всегда настоящие. Выключите, чтобы открыть всем']
     ]
@@ -796,6 +799,166 @@
     common.appendChild(save2);
     box.appendChild(common);
   }
+
+  // --------------------------------------------------- онлайн-платежи: отчёт
+
+  function isoDay(d) {
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-'
+      + String(d.getDate()).padStart(2, '0');
+  }
+
+  function quickPeriod(days) {
+    var to = new Date();
+    var from = new Date();
+    if (days === 1) { to.setDate(to.getDate() - 1); from.setDate(from.getDate() - 1); }
+    else if (days > 1) from.setDate(from.getDate() - (days - 1));
+    document.getElementById('repFrom').value = isoDay(from);
+    document.getElementById('repTo').value = isoDay(to);
+  }
+
+  function reportQuery() {
+    return '?date_from=' + encodeURIComponent(document.getElementById('repFrom').value)
+      + '&date_to=' + encodeURIComponent(document.getElementById('repTo').value);
+  }
+
+  function loadReport() {
+    if (!document.getElementById('repFrom').value) quickPeriod(0);
+    api('/online-payments' + reportQuery()).then(renderReport).catch(function (e) { say(e.message); });
+  }
+
+  function cell(tr, text, cls) {
+    var td = el('td', cls, text);
+    tr.appendChild(td);
+    return td;
+  }
+
+  function headRow(table, titles) {
+    var tr = document.createElement('tr');
+    titles.forEach(function (t) {
+      tr.appendChild(el('th', t[1] || null, t[0]));
+    });
+    table.appendChild(tr);
+  }
+
+  var FISCAL = { ok: 'есть', wait: 'ждём', missing: 'нет', error: 'ошибка', none: '—' };
+
+  function renderReport(r) {
+    document.getElementById('cntAlerts').textContent = r.alerts.length ? r.alerts.length : '';
+
+    var box = document.getElementById('repAlerts');
+    box.innerHTML = '';
+    r.alerts.forEach(function (a) {
+      var d = el('div', 'ralert');
+      d.appendChild(el('b', null, a.number + ' · ' + a.provider + ': '));
+      d.appendChild(document.createTextNode(a.text));
+      box.appendChild(d);
+    });
+
+    var tot = document.getElementById('repTotals');
+    tot.innerHTML = '';
+    r.totals.providers.concat(r.totals.providers.length > 1 ? [r.totals.overall] : [])
+      .forEach(function (t) {
+        var c = el('div', 'rtot');
+        c.appendChild(el('div', 't', t.title));
+        c.appendChild(el('div', 'meta', 'Должно прийти на счёт'));
+        c.appendChild(el('div', 'n', money(t.net)));
+        c.appendChild(el('div', 'meta', t.count + ' плат. на ' + money(t.paid)
+          + (t.refund_count ? ' · возвратов ' + t.refund_count + ' на ' + money(t.refunds) : '')
+          + ' · комиссия ' + money(t.fee)));
+        tot.appendChild(c);
+      });
+    if (!r.payments.length) tot.appendChild(el('div', 'meta', 'За этот период онлайн-платежей нет.'));
+
+    var days = document.getElementById('repDays');
+    days.innerHTML = '';
+    headRow(days, [['Дата'], ['Способ'], ['Платежей', 'num'], ['Оплачено', 'num'],
+                   ['Возвраты', 'num'], ['Комиссия', 'num'], ['На счёт', 'num']]);
+    r.totals.days.forEach(function (d) {
+      var tr = document.createElement('tr');
+      cell(tr, d.day.split('-').reverse().join('.'));
+      cell(tr, d.title);
+      cell(tr, d.count, 'num');
+      cell(tr, money(d.paid), 'num');
+      cell(tr, d.refunds ? money(d.refunds) : '—', 'num');
+      cell(tr, money(d.fee), 'num');
+      cell(tr, money(d.net), 'num');
+      days.appendChild(tr);
+    });
+
+    var rows = document.getElementById('repRows');
+    rows.innerHTML = '';
+    headRow(rows, [['Время'], ['Заказ'], ['Покупатель'], ['Способ'], ['Сумма', 'num'],
+                   ['Комиссия', 'num'], ['На счёт', 'num'], ['Состояние'], ['Чек'],
+                   ['Касса REGOS'], ['Заказ']]);
+    r.payments.forEach(function (p) {
+      var tr = document.createElement('tr');
+      cell(tr, p.time);
+      cell(tr, p.number);
+      cell(tr, p.customer);
+      cell(tr, p.provider);
+      cell(tr, money(p.amount), 'num');
+      cell(tr, money(p.fee) + ' (' + p.fee_pct + '%)', 'num');
+      cell(tr, money(p.net), 'num');
+      cell(tr, '').appendChild(el('span', 'pill ' + (p.state === 'paid' ? 'ok' : 'warn'),
+                                  p.state_text));
+      var fc = cell(tr, '');
+      if (p.fiscal_url) {
+        var a = el('a', null, 'открыть');
+        a.href = p.fiscal_url;
+        a.target = '_blank';
+        a.rel = 'noopener';
+        fc.appendChild(a);
+      } else {
+        fc.appendChild(el('span', 'pill ' + (p.fiscal === 'none' ? 'no' : 'warn'),
+                          FISCAL[p.fiscal] || ''));
+        if (p.fiscal_note) fc.title = p.fiscal_note;
+      }
+      cell(tr, p.regos_status + (p.regos_doc ? ' · №' + p.regos_doc : ''));
+      cell(tr, p.order_status);
+      rows.appendChild(tr);
+    });
+
+    document.getElementById('repNote').textContent = 'Комиссия: Payme ' + r.fees.payme
+      + '%, Click ' + r.fees.click + '%, Paynet ' + r.fees.paynet + '% — меняется в разделе '
+      + '«Онлайн оплата». «Не закрыт на кассе» — если заказ оплачен больше ' + r.open_hours
+      + ' ч назад, а в REGOS не «Завершен». Время — ташкентское.';
+  }
+
+  document.querySelectorAll('#repQuick .tab').forEach(function (t) {
+    t.onclick = function () {
+      document.querySelectorAll('#repQuick .tab').forEach(function (x) {
+        x.classList.toggle('on', x === t);
+      });
+      quickPeriod(Number(t.dataset.days));
+      loadReport();
+    };
+  });
+  document.getElementById('repShow').onclick = function () {
+    document.querySelectorAll('#repQuick .tab').forEach(function (x) { x.classList.remove('on'); });
+    loadReport();
+  };
+  document.getElementById('repXlsx').onclick = function (e) {
+    var button = e.target;
+    button.disabled = true;
+    var headers = {};
+    if (tg && tg.initData) headers['X-Telegram-Init-Data'] = tg.initData;
+    fetch('/api/admin/online-payments.xlsx' + reportQuery(), { headers: headers })
+      .then(function (r) {
+        if (!r.ok) throw new Error('Файл не получен: ' + r.status);
+        var found = (r.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/);
+        return r.blob().then(function (b) { return [b, found ? found[1] : 'onlayn-platezhi.xlsx']; });
+      })
+      .then(function (res) {
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(res[0]);
+        a.download = res[1];
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+      })
+      .catch(function (err) { say(err.message); })
+      .then(function () { button.disabled = false; });
+  };
 
   // --------------------------------------------------- стоимость доставки
 
@@ -1222,10 +1385,13 @@
     document.getElementById('viewOrders').hidden = view !== 'orders';
     document.getElementById('viewSettings').hidden = view !== 'settings';
     document.getElementById('viewPayments').hidden = view !== 'payments';
-    document.getElementById('q').hidden = view === 'settings' || view === 'payments';
+    document.getElementById('viewReport').hidden = view !== 'report';
+    document.getElementById('q').hidden = view === 'settings' || view === 'payments'
+      || view === 'report';
     document.getElementById('ttl').textContent =
       { products: 'Категории и товары', orders: 'Заказы',
-        settings: 'Состав каталога', payments: 'Онлайн оплата' }[view];
+        settings: 'Состав каталога', payments: 'Онлайн оплата',
+        report: 'Онлайн-платежи' }[view];
     document.querySelectorAll('.nav').forEach(function (n) {
       n.classList.toggle('on', n.dataset.go === view);
     });
@@ -1233,6 +1399,7 @@
     if (view === 'products') loadProducts();
     else if (view === 'orders') loadOrders();
     else if (view === 'payments') loadPaySwitches();
+    else if (view === 'report') loadReport();
     else loadSettings();
   }
 

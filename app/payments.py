@@ -111,6 +111,12 @@ REGOS_PAY_CLICK = os.getenv("REGOS_PAY_CLICK", "").strip()
 REGOS_PAY_PAYNET = os.getenv("REGOS_PAY_PAYNET", "").strip()
 REGOS_PAY_TELEGRAM = os.getenv("REGOS_PAY_TELEGRAM", "").strip()
 
+# Комиссия платёжных систем, % — по договорам. Деньги приходят на основной
+# счёт уже без неё; отчёт «Онлайн-платежи» считает по ней, сколько должно прийти
+FEE_PAYME = os.getenv("FEE_PAYME", "1").strip()
+FEE_CLICK = os.getenv("FEE_CLICK", "2").strip()
+FEE_PAYNET = os.getenv("FEE_PAYNET", "1").strip()
+
 # Секрет вебхука магазинного бота. Без него вебхук отвергает всё, и оплата
 # гарантированно не пройдёт: запрос перед списанием уйдёт в тайм-аут.
 # Поэтому без секрета оплата картой считается выключенной.
@@ -226,6 +232,7 @@ CONFIG_FIELDS = {
     "CLICK_DELIVERY_SPIC": str, "CLICK_DELIVERY_PACKAGE": str,
     "REGOS_PAY_PAYME": str, "REGOS_PAY_CLICK": str, "REGOS_PAY_PAYNET": str,
     "REGOS_PAY_TELEGRAM": str,
+    "FEE_PAYME": str, "FEE_CLICK": str, "FEE_PAYNET": str,
     "TEST_USERS": lambda v: {int(x) for x in v.replace(" ", "").split(",") if x.isdigit()},
     "TESTERS_ONLY": lambda v: v == "1",
 }

@@ -64,6 +64,16 @@ button.act.blue:hover{background:#1A56DB}
 .pane .bar{border-bottom:1px solid #ECECEC}
 .pane .body{padding:18px 22px 30px}
 .fld{margin-bottom:14px}
+/* раздел «Онлайн-платежи» */
+.rtotals{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}
+.rtot{border:1px solid #ECECEC;border-radius:12px;padding:12px 14px}
+.rtot .t{font-weight:600;margin-bottom:6px}
+.rtot .n{font-size:20px;font-weight:600;margin:2px 0}
+.ralert{background:#FFF3E0;color:#8A3B00;border-radius:10px;padding:9px 12px;margin-bottom:8px;font-size:13px}
+.ralert b{color:#5A2600}
+td.num,th.num{text-align:right;white-space:nowrap}
+#repRows td:nth-child(-n+2),#repDays td:first-child{white-space:nowrap}
+td a{color:#1C64F2}
 /* раздел «Онлайн оплата» */
 .pcard{border:1px solid #ECECEC;border-radius:14px;padding:16px 18px;margin-bottom:16px;
   max-width:720px;background:#fff}
@@ -101,6 +111,7 @@ button.act.blue:hover{background:#1A56DB}
     <div class="nav" data-go="orders">Заказы <span class="cnt" id="cntOrders"></span></div>
     <div class="nav" data-go="settings">Состав каталога</div>
     <div class="nav" data-go="payments">Онлайн оплата</div>
+    <div class="nav" data-go="report">Онлайн-платежи <span class="cnt" id="cntAlerts"></span></div>
     <div style="margin-top:auto;padding:14px 18px 0">
       <div class="meta" id="who" style="margin-bottom:8px"></div>
       <button class="act ghost" id="logout" style="width:100%">Выйти</button>
@@ -136,6 +147,29 @@ button.act.blue:hover{background:#1A56DB}
           проходят как обычно. Ключи применяются за несколько секунд, без перезапуска.
           Пустое поле — работает значение из настроек сервера.</p>
         <div id="payCards"></div>
+      </div>
+
+      <div id="viewReport" hidden>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
+          <div class="tabs" style="margin:0" id="repQuick">
+            <button class="tab on" data-days="0">Сегодня</button>
+            <button class="tab" data-days="1">Вчера</button>
+            <button class="tab" data-days="7">7 дней</button>
+            <button class="tab" data-days="30">30 дней</button>
+          </div>
+          <input type="date" id="repFrom" style="max-width:160px">
+          <span class="meta">—</span>
+          <input type="date" id="repTo" style="max-width:160px">
+          <button class="act blue" id="repShow">Показать</button>
+          <button class="act ghost" id="repXlsx">Скачать Excel</button>
+        </div>
+        <div id="repAlerts"></div>
+        <div id="repTotals" class="rtotals"></div>
+        <h3 style="margin:18px 0 8px;font-size:15px">По дням</h3>
+        <div style="overflow-x:auto"><table id="repDays"></table></div>
+        <h3 style="margin:22px 0 8px;font-size:15px">Платежи</h3>
+        <div style="overflow-x:auto"><table id="repRows"></table></div>
+        <p class="meta" id="repNote" style="margin-top:12px;max-width:760px"></p>
       </div>
 
       <div id="viewSettings" hidden>

@@ -985,9 +985,12 @@ def regos_payment_types() -> list[dict]:
     except Exception as exc:                # noqa: BLE001
         log.warning("Формы оплаты REGOS не получены: %s", exc)
         return _regos_types["rows"]
+    if not isinstance(rows, list):
+        rows = []
     _regos_types["rows"] = [
         {"id": r.get("id"), "name": r.get("name"), "cash": bool(r.get("is_cash"))}
-        for r in rows if str(r.get("enabled", "")).lower() in ("true", "frontoffice")]
+        for r in rows if isinstance(r, dict)
+        and str(r.get("enabled", "")).lower() in ("true", "frontoffice")]
     _regos_types["at"] = time.time()
     return _regos_types["rows"]
 
@@ -1016,6 +1019,14 @@ def set_payment_config(data: PaymentConfigIn, request: Request, db: Session = De
         if name in ("CLICK_SERVICE_ID", "CLICK_MERCHANT_ID", "CLICK_MERCHANT_USER_ID") \
                 and value and not value.isdigit():
             raise HTTPException(status_code=400, detail="ID в Click — только цифры")
+        if name.startswith("FEE_") and value:
+            try:
+                fee = float(value.replace(",", "."))
+            except ValueError:
+                fee = -1
+            if not 0 <= fee <= 20:
+                raise HTTPException(status_code=400, detail="Комиссия — число от 0 до 20, в процентах")
+            value = str(fee).rstrip("0").rstrip(".") if "." in str(fee) else str(fee)
         if name.startswith("REGOS_PAY_") and value and not value.isdigit():
             raise HTTPException(status_code=400, detail="Форма оплаты REGOS — номер из справочника")
         if name == "CLICK_TIN" and value and not re.fullmatch(r"[0-9]{9}|[0-9]{14}", value):
@@ -1053,6 +1064,41 @@ def new_paynet_password(request: Request, db: Session = Depends(get_db),
     payments.set_config(db, {"PAYNET_PASSWORD": password})
     log.info("Пароль Paynet сгенерирован заново")
     return {"password": password, **payment_switches(request, _)}
+
+
+# ------------------------------------------------------- онлайн-платежи: отчёт
+
+@router.get("/online-payments")
+def online_payments(date_from: str | None = None, date_to: str | None = None,
+                    db: Session = Depends(get_db), _: TelegramUser = Depends(require_admin)):
+    """Онлайн-платежи за период (сутки по Ташкенту): платежи, итоги, предупреждения."""
+    from app import payments_report as report
+    day_to = report.parse_day(date_to, report.today())
+    day_from = report.parse_day(date_from, day_to)
+    if day_from > day_to:
+        day_from, day_to = day_to, day_from
+    if (day_to - day_from).days > 366:
+        raise HTTPException(status_code=400, detail="Период — не больше года")
+    return report.view(db, day_from, day_to)
+
+
+@router.get("/online-payments.xlsx")
+def online_payments_xlsx(date_from: str | None = None, date_to: str | None = None,
+                         db: Session = Depends(get_db), _: TelegramUser = Depends(require_admin)):
+    """То же — файлом Excel."""
+    from fastapi.responses import Response as FileResponse
+
+    from app import payments_report as report
+    day_to = report.parse_day(date_to, report.today())
+    day_from = report.parse_day(date_from, day_to)
+    if day_from > day_to:
+        day_from, day_to = day_to, day_from
+    if (day_to - day_from).days > 366:
+        raise HTTPException(status_code=400, detail="Период — не больше года")
+    name = f"onlayn-platezhi_{day_from:%Y-%m-%d}_{day_to:%Y-%m-%d}.xlsx"
+    return FileResponse(report.xlsx(db, day_from, day_to),
+                        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 class PaymentSwitchIn(BaseModel):
