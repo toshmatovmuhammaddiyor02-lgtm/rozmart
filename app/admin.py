@@ -684,7 +684,7 @@ def push_order_to_regos(
     """
     from app.regos.client import RegosClient, RegosError
     from app.regos.orders_push import (
-        PUSHABLE, ConfirmError, OrderPushError, item_codes, push_order,
+        PUSHABLE, ConfirmError, OrderPushError, item_codes, operating_cash, push_order,
     )
 
     # та же блокировка строки, что у автоотправки: кнопка оператора и фоновая
@@ -710,7 +710,7 @@ def push_order_to_regos(
     order.regos_attempts += 1
     try:
         order.regos_document_id = push_order(
-            RegosClient(), order, item_codes(db, [order])
+            RegosClient(), order, item_codes(db, [order]), operating_cash(db)
         )
         order.regos_error = None
         db.commit()
@@ -1388,6 +1388,54 @@ def sync_now(user: TelegramUser = Depends(require_admin)):
         raise HTTPException(status_code=409, detail="Обновление из REGOS уже идёт")
     log.info("Обновление каталога из REGOS запущено вручную: %s", user.name)
     return {"running": True}
+
+
+class CashPatch(BaseModel):
+    operating_cash_id: int = Field(ge=0)
+
+
+@router.get("/regos/cash")
+def get_cash(db: Session = Depends(get_db), _: TelegramUser = Depends(require_admin)):
+    """Касса, на которую встают заказы, и кассы склада с последней сменой."""
+    from app.regos import config as regos_config
+    from app.regos.client import RegosClient, RegosError
+    from app.regos.orders_push import cashes, operating_cash
+
+    data = {"selected": operating_cash(db), "cashes": [], "error": None}
+    if not regos_config.is_configured():
+        data["error"] = "Не задан ключ REGOS"
+        return data
+    try:
+        data["cashes"] = cashes(RegosClient())
+    except (RegosError, RuntimeError, OSError) as exc:
+        data["error"] = f"REGOS не ответил: {exc}"
+    return data
+
+
+@router.put("/regos/cash")
+def set_cash(
+    data: CashPatch,
+    db: Session = Depends(get_db),
+    user: TelegramUser = Depends(require_admin),
+):
+    """Выбрать кассу для заказов. 0 — общая очередь склада.
+
+    Действует на заказы, которые уйдут в REGOS после сохранения: уже
+    выгруженные остаются, где стоят.
+    """
+    from app.regos.client import RegosClient, RegosError
+    from app.regos.orders_push import cashes, save_operating_cash
+
+    if data.operating_cash_id:
+        try:
+            known = {c["id"] for c in cashes(RegosClient())}
+        except (RegosError, RuntimeError, OSError) as exc:
+            raise HTTPException(status_code=502, detail=f"REGOS не ответил: {exc}")
+        if data.operating_cash_id not in known:
+            raise HTTPException(status_code=400, detail="Такой кассы нет на складе магазина")
+    save_operating_cash(db, data.operating_cash_id)
+    log.info("Касса для заказов: %s (%s)", data.operating_cash_id or "общая очередь", user.name)
+    return {"selected": data.operating_cash_id}
 
 
 class AutoPushPatch(BaseModel):

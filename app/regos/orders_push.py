@@ -189,11 +189,13 @@ def _receipt_lines(order: Order) -> str:
     return "\n".join(lines)
 
 
-def push_order(client: RegosClient, order: Order, item_ids: dict[int, str]) -> int:
+def push_order(client: RegosClient, order: Order, item_ids: dict[int, str],
+               cash_id: int = 0) -> int:
     """Отправляет заказ в REGOS. Возвращает id созданного документа.
 
     Повторный вызов для уже выгруженного заказа ничего не создаёт и возвращает
-    id существующего документа.
+    id существующего документа. cash_id — касса из панели (operating_cash),
+    0 — общая очередь склада.
     """
     if not config.orders_enabled():
         raise OrderPushError(
@@ -231,6 +233,18 @@ def push_order(client: RegosClient, order: Order, item_ids: dict[int, str]) -> i
             f"Заказ выгружен (документ {new_id}), но не подтверждён: {exc}",
             document_id=new_id,
         ) from exc
+
+    if cash_id:
+        try:
+            assign_cash(client, new_id, cash_id)
+        except (RegosError, RuntimeError, OSError) as exc:
+            # заказ всё равно у кассиров — в общей очереди склада
+            log.warning("Заказ %s: касса %s не назначена: %s", order.number, cash_id, exc)
+            raise ConfirmError(
+                f"Заказ выгружен (документ {new_id}) и стоит в общей очереди: "
+                f"на кассу {cash_id} поставить не удалось: {exc}",
+                document_id=new_id,
+            ) from exc
     return new_id
 
 
@@ -303,7 +317,7 @@ def push_pending(db, client: RegosClient | None = None) -> dict:
     for order in orders:
         order.regos_attempts += 1
         try:
-            order.regos_document_id = push_order(client, order, codes)
+            order.regos_document_id = push_order(client, order, codes, operating_cash(db))
             order.regos_error = None
             sent += 1
         except ConfirmError as exc:
@@ -336,16 +350,14 @@ def confirm(client: RegosClient, document_id: int) -> None:
     Жизненный цикл заказа в REGOS:
         Новый -> Утверждён -> В обработке -> Оплата (продажа) -> Завершён
 
-    Интеграция доводит документ ровно до «Утверждён» и останавливается.
-    Дальше — работа кассира: он видит заказ в списке на приём, нажимает
-    «Принять», и REGOS сам привязывает его кассу и переводит в «В обработке».
+    Без выбранной в панели кассы интеграция доводит документ ровно до
+    «Утверждён» и останавливается: заказ в общей очереди склада, кассир
+    нажимает «Принять», и REGOS сам привязывает его кассу и переводит
+    в «В обработке». С выбранной кассой — см. assign_cash().
 
-    Чего делать НЕЛЬЗЯ, проверено на живых заказах:
-      * назначать кассу через SetOperatingCash. Привязанный заказ уходит
-        из общего списка, и кассир его больше не видит;
-      * переводить в «Оплата (продажа)». Это состояние означает «заказ уже
-        взят в оплату на конкретной кассе» — в очереди на приём его нет.
-    Оба шага я сначала делал, и заказы переставали доходить до кассира,
+    Чего делать НЕЛЬЗЯ, проверено на живых заказах: переводить в «Оплата
+    (продажа)». Это состояние означает «заказ уже взят в оплату на конкретной
+    кассе» — в очереди его нет, и заказы переставали доходить до кассира,
     хотя в REGOS выглядели проведёнными.
 
     Неудача здесь не отменяет саму выгрузку: заказ уже в REGOS, и потерять его
@@ -353,6 +365,83 @@ def confirm(client: RegosClient, document_id: int) -> None:
     """
     client.call("DocOrderDelivery/SetStatus", {"id": document_id, "status": "Approved"})
     log.info("Документ %s подтверждён и ждёт приёма на кассе", document_id)
+
+
+# --------------------------------------------------------------------- касса
+
+# На какую кассу склада ставить заказ. Выбирается в панели. 0 — общая очередь:
+# заказ ждёт «Принять» у любого кассира склада, как заказы Uzum.
+SETTING_CASH = "regos_operating_cash_id"
+
+
+def operating_cash(db) -> int:
+    from app.models import Setting
+
+    row = db.get(Setting, SETTING_CASH)
+    try:
+        return int(row.value) if row and row.value else 0
+    except ValueError:
+        return 0
+
+
+def save_operating_cash(db, cash_id: int) -> None:
+    from app.models import Setting
+
+    row = db.get(Setting, SETTING_CASH)
+    if row is None:
+        db.add(Setting(name=SETTING_CASH, value=str(cash_id)))
+    else:
+        row.value = str(cash_id)
+    db.commit()
+
+
+def assign_cash(client: RegosClient, document_id: int, cash_id: int) -> None:
+    """Ставит подтверждённый заказ на кассу; REGOS сам переводит его
+    в «В обработке». Только после «Утверждён»: к неподтверждённому документу
+    кассу REGOS не привязывает (ошибка 1064).
+
+    В первой версии привязка была, и заказы до кассира не доходили. Но тогда
+    сошлись две ошибки: выбрана была касса 7, за которой ни разу не открывали
+    смену, а документ сразу уводился в «Оплата (продажа)». Поэтому в панели
+    рядом с кассой видна её последняя смена, а «Оплату» здесь не ставим.
+    """
+    client.call("DocOrderDelivery/SetOperatingCash",
+                {"id": document_id, "operating_cash_id": cash_id})
+    log.info("Документ %s поставлен на кассу %s", document_id, cash_id)
+
+
+def cashes(client: RegosClient) -> list[dict]:
+    """Кассы склада витрины и последняя смена на каждой.
+
+    Названий у касс в REGOS нет, только id. Различить их можно по сменам:
+    код смены — номер, который кассир видит на экране («11-0000532»),
+    и имя кассира, открывшего смену.
+    """
+    def rows(result):
+        return (result.get("result") if isinstance(result, dict) else result) or []
+
+    found = []
+    for cash in rows(client.call("OperatingCash/Get", {})):
+        if (cash.get("stock") or {}).get("id") != config.STOCK_ID:
+            continue
+        sessions = rows(client.call("DocCashSession/Get", {"limit": 1, "offset": 0, "filters": [
+            {"Field": "operating_cash_id", "Operator": "Equal", "Value": str(cash["id"])}]}))
+        last = None
+        if sessions:
+            s = sessions[0]
+            last = {
+                "code": s.get("code"),
+                "start": s.get("start_date") or None,
+                "closed": bool(s.get("closed")),
+                "close": s.get("close_date") or None,
+                "cashier": (s.get("start_user") or {}).get("full_name"),
+            }
+        found.append({"id": cash["id"], "description": cash.get("description") or "",
+                      "last_session": last})
+    # рабочие — первыми: в первой версии кассу без смен выбрали только потому,
+    # что она стояла в списке первой
+    found.sort(key=lambda c: -((c["last_session"] or {}).get("start") or 0))
+    return found
 
 
 # ------------------------------------------------- покупатель и срок доставки
@@ -512,7 +601,7 @@ def push_one(order_id: int) -> None:
         order.regos_attempts += 1
         try:
             order.regos_document_id = push_order(
-                RegosClient(), order, item_codes(db, [order])
+                RegosClient(), order, item_codes(db, [order]), operating_cash(db)
             )
             order.regos_error = None
         except ConfirmError as exc:

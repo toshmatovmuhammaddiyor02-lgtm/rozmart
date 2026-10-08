@@ -226,10 +226,13 @@ td a{color:#1C64F2}
           <input type="checkbox" id="autoPush" style="width:auto">
           <span>Отправлять автоматически сразу после оформления</span>
         </label>
-        <p class="meta" id="autoNote" style="margin:0 0 6px"></p>
-        <p class="meta" style="margin:0 0 26px">Заказ уходит в REGOS со статусом «Утверждён»
-          и встаёт в очередь на приём. Кассу он занимает сам, когда кассир нажимает
-          «Принять» — назначать её заранее нельзя, иначе заказ пропадает из очереди.</p>
+        <p class="meta" id="autoNote" style="margin:0 0 14px"></p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+          <span>Касса для заказов</span>
+          <select id="cashSelect" style="max-width:460px"></select>
+          <button class="act" id="cashSave" disabled>Сохранить</button>
+        </div>
+        <p class="meta" id="cashNote" style="margin:0 0 26px;max-width:720px"></p>
 
         <h3 style="margin:0 0 4px;font-size:15px">Кому приходят заказы</h3>
         <p class="meta" style="margin:0 0 12px">Каждый новый заказ и каждая отмена уходят

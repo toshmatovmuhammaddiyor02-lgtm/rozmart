@@ -603,6 +603,7 @@
     api('/categories').then(renderCats).catch(function (e) { say(e.message); });
     api('/regos/groups').then(renderGroups).catch(function (e) { say(e.message); });
     api('/regos/auto').then(renderAuto).catch(function (e) { say(e.message); });
+    loadCash();
     loadChats();
     loadPriceTypes();
     loadDelivery();
@@ -1266,6 +1267,83 @@
       say(err.message);
       loadSettings();
     });
+  };
+
+  // Касса, на которую встают заказы. Названий у касс в REGOS нет, только id,
+  // поэтому подписываем последней сменой: её номер кассир видит на экране,
+  // и сразу видно, работает ли за кассой кто-нибудь
+  var cashState = { selected: 0 };
+
+  function cashLabel(c) {
+    var s = c.last_session;
+    var text = 'Касса ' + c.id + (c.description ? ' (' + c.description + ')' : '');
+    if (!s) return text + ' — смен не было ни разу';
+    return text + ' — смена ' + s.code + (s.cashier ? ', ' + s.cashier : '') +
+      (s.closed ? ', последняя ' + when(s.start) : ', открыта с ' + when(s.start));
+  }
+
+  function cashNote(id, data) {
+    if (!id) {
+      return 'Заказ встаёт в общую очередь склада со статусом «Утверждён» и ждёт, ' +
+        'пока любой кассир нажмёт «Принять» — тогда REGOS сам привяжет его кассу. ' +
+        'Так приходят и заказы Uzum.';
+    }
+    var c = (data.cashes || []).filter(function (x) { return x.id === id; })[0];
+    var text = 'Заказ сразу ставится на кассу ' + id + ' и переходит в «В обработке» — ' +
+      'другие кассы его не видят. Первый заказ после переключения проверьте на этой кассе.';
+    if (c && !c.last_session) text += ' Внимание: на этой кассе смену не открывали ни разу — ' +
+      'за ней, похоже, никто не работает, и заказы до кассира не дойдут.';
+    else if (c && c.last_session.closed) text += ' Сейчас смена на ней закрыта.';
+    return text;
+  }
+
+  function loadCash() {
+    var sel = document.getElementById('cashSelect');
+    var note = document.getElementById('cashNote');
+    api('/regos/cash').then(function (data) {
+      cashState = data;
+      sel.innerHTML = '';
+      var opt = el('option', null, 'Общая очередь склада — принимает любой кассир');
+      opt.value = '0';
+      sel.appendChild(opt);
+      (data.cashes || []).forEach(function (c) {
+        var o = el('option', null, cashLabel(c));
+        o.value = String(c.id);
+        sel.appendChild(o);
+      });
+      if (data.selected && !(data.cashes || []).some(function (c) { return c.id === data.selected; })) {
+        // выбранной кассы REGOS не показал — не теряем её из списка молча
+        var o = el('option', null, 'Касса ' + data.selected + ' — нет в списке REGOS');
+        o.value = String(data.selected);
+        sel.appendChild(o);
+      }
+      sel.value = String(data.selected || 0);
+      document.getElementById('cashSave').disabled = true;
+      note.textContent = (data.error ? data.error + '. ' : '') + cashNote(data.selected, data);
+      note.style.color = data.error ? '#C0392B' : '';
+    }).catch(function (e) { note.textContent = e.message; });
+  }
+
+  document.getElementById('cashSelect').onchange = function (e) {
+    var id = Number(e.target.value);
+    document.getElementById('cashSave').disabled = id === (cashState.selected || 0);
+    document.getElementById('cashNote').textContent = cashNote(id, cashState);
+  };
+
+  document.getElementById('cashSave').onclick = function (e) {
+    var id = Number(document.getElementById('cashSelect').value);
+    var c = (cashState.cashes || []).filter(function (x) { return x.id === id; })[0];
+    if (c && !c.last_session &&
+        !confirm('На кассе ' + id + ' смену не открывали ни разу. Заказы туда, скорее всего, ' +
+                 'не дойдут до кассира. Всё равно выбрать?')) return;
+    e.target.disabled = true;
+    api('/regos/cash', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ operating_cash_id: id })
+    }).then(function () {
+      say(id ? 'Новые заказы пойдут на кассу ' + id : 'Новые заказы пойдут в общую очередь', 'ok');
+      loadCash();
+    }).catch(function (err) { say(err.message); e.target.disabled = false; });
   };
 
   function when(ts) {
