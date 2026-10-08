@@ -12,11 +12,16 @@
 отклоняется ошибкой 1008. Дороже одного вызова в минуту это не обходится,
 и лимит REGOS (2 запроса в секунду) остаётся свободным для каталога.
 
-Двигаем только вперёд. В REGOS документ может вернуться в «Новый» — так уже
-бывало с половиной выгруженных заказов. Если бы мы повторяли это движение,
-покупатель, которому сказали «собираем», увидел бы «ждёт оплаты», а за ним
-и второе сообщение об этом. Поэтому состояние меняется, только если новое
-дальше нынешнего; исключение — отмена, она приходит из любого места.
+Двигаем только вперёд: состояние меняется, только если новое дальше
+нынешнего; исключение — отмена, она приходит из любого места.
+
+Отмена на кассе в REGOS выглядит не как «Отменен», а как возврат документа
+в «Новый» без кассы — проверено 8 октября 2026 на трёх заказах, отменённых
+кассиром SAMPI. Подтверждённый нами документ сам в «Новый» не возвращается,
+поэтому такой возврат считаем отменой: заказ отменяется на витрине, а документ
+в REGOS доводим до «Отменен», чтобы его не подхватила другая касса.
+Исключение — заказ, который мы так и не смогли подтвердить (regos_error):
+его «Новый» — это не отмена, а неудачная выгрузка.
 
 Об отмене, пришедшей с кассы, сообщаем сотрудникам: заказ мог быть уже
 в сборке. Остальные переходы они и так видят в REGOS.
@@ -41,8 +46,8 @@ log = logging.getLogger(__name__)
 #   25 Оплата (продажа)  CTLG_ORDER_STATUS_PREPARE_PAY   пробивают на кассе
 #   26 Завершен                                          закрыт
 #   27 Отменен           CTLG_ORDER_STATUS_CANCELED      отменён
-# 22 сюда не входит намеренно: это состояние до подтверждения, и возвращать
-# в него заказ, о котором покупателю уже сказали «собираем», нельзя.
+# 22 сюда не входит: заказ, подтверждённый нами, возвращается в «Новый»
+# только отменой на кассе — см. returned_by_cash().
 STATUS = {
     23: "CONFIRMED",
     24: "ASSEMBLING",
@@ -103,12 +108,24 @@ def fetch_statuses(client: RegosClient, document_ids: list[int]) -> dict[int, di
     return found
 
 
+NEW_STATUS_ID = 22
+
+
+def returned_by_cash(order: Order, regos_status: dict) -> bool:
+    """Касса вернула подтверждённый заказ в «Новый» — так выглядит отмена кассиром."""
+    return (regos_status.get("id") == NEW_STATUS_ID
+            and order.status in ("CONFIRMED", "ASSEMBLING", "DELIVERING")
+            and not order.regos_error)
+
+
 def target_status(order: Order, regos_status: dict) -> str | None:
     """Во что перевести заказ. None — оставить как есть."""
     code = regos_status.get("id")
     new = STATUS.get(code)
+    if returned_by_cash(order, regos_status):
+        return "CANCELED"
     if new is None:
-        if code != 22:              # 22 «Новый» — ожидаемое состояние, не шумим
+        if code != NEW_STATUS_ID:   # «Новый» без подтверждения — не шумим
             log.info("Заказ %s: статус REGOS %s (%s) витрине неизвестен",
                      order.number, code, regos_status.get("name"))
         return None
@@ -168,6 +185,16 @@ def sync(db, client: RegosClient | None = None, notify_staff: bool = True) -> di
             # заказ мог быть у доставщика в пути — пусть не везёт
             from app import courier_bot
             courier_bot.order_canceled(order)
+        if new == "CANCELED" and status.get("id") == NEW_STATUS_ID:
+            # «Новый» после отмены кассиром: доводим до «Отменен», иначе
+            # документ снова встанет в очередь и его примет другая касса
+            from app.regos.orders_push import cancel_document
+            try:
+                cancel_document(client, order.regos_document_id)
+            except (RegosError, RuntimeError, OSError) as exc:
+                order.regos_error = f"отменён на кассе, но в REGOS не закрыт: {exc}"[:500]
+                log.warning("Заказ %s: документ %s не отменён в REGOS: %s",
+                            order.number, order.regos_document_id, exc)
         changed.append({"number": order.number, "from": was, "to": new,
                         "regos": status.get("name")})
         log.info("Заказ %s: %s -> %s (REGOS: %s)",
