@@ -141,7 +141,7 @@ def save_groups(db: Session, group_ids: list[int]) -> None:
 
 
 def fetch_items(client: RegosClient, groups: list[int] | None = None,
-                price_type_id: int | None = None) -> list[dict]:
+                price_type_id: int | None = None, stock_id: int | None = None) -> list[dict]:
     """Каталог магазина с ценами и остатками.
 
     stock_id и price_type_id передаются всегда: без price_type_id REGOS молча
@@ -149,7 +149,7 @@ def fetch_items(client: RegosClient, groups: list[int] | None = None,
     тот, что выбран в панели (app/regos/prices.py), по умолчанию из окружения.
     """
     filters = [
-        {"Field": "stock_id", "Operator": "Equal", "Value": str(config.STOCK_ID)},
+        {"Field": "stock_id", "Operator": "Equal", "Value": str(stock_id or config.STOCK_ID)},
         {"Field": "price_type_id", "Operator": "Equal",
          "Value": str(price_type_id or config.PRICE_TYPE_ID)},
     ]
@@ -204,8 +204,9 @@ def sync_catalog(
     groups = selected_groups(db)
     log.info("группы номенклатуры: %s", groups or "все")
     price_type_id = prices.current(db)
-    log.info("вид цены: %s", price_type_id)
-    items = fetch_items(client, groups, price_type_id)
+    stock_id = config.stock_id(db)
+    log.info("склад: %s, вид цены: %s", stock_id, price_type_id)
+    items = fetch_items(client, groups, price_type_id, stock_id)
     log.info("REGOS отдал позиций: %s", len(items))
 
     # Полный перечень кодов нужен, чтобы отличить «позиция удалена из REGOS»
@@ -306,13 +307,14 @@ def fill_fiscal(db: Session, client: RegosClient, variants: list[Variant],
     """МХИК, код упаковки и НДС для фасовок вне выборки — по их кодам."""
     by_code = {v.external_code: v for v in variants}
     codes = list(by_code)
+    stock_id = config.stock_id(db)
     filled = 0
     for start in range(0, len(codes), prices.CHUNK):
         chunk = codes[start:start + prices.CHUNK]
         result = client.call("Item/GetExt", {
             "limit": len(chunk), "offset": 0,
             "filters": [
-                {"Field": "stock_id", "Operator": "Equal", "Value": str(config.STOCK_ID)},
+                {"Field": "stock_id", "Operator": "Equal", "Value": str(stock_id)},
                 {"Field": "price_type_id", "Operator": "Equal", "Value": str(price_type_id)},
                 {"Field": "code", "Operator": "In",
                  "Value": ",".join(str(int(code)) for code in chunk)},

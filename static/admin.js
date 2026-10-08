@@ -603,6 +603,7 @@
     api('/categories').then(renderCats).catch(function (e) { say(e.message); });
     api('/regos/groups').then(renderGroups).catch(function (e) { say(e.message); });
     api('/regos/auto').then(renderAuto).catch(function (e) { say(e.message); });
+    loadStocks();
     loadCash();
     loadChats();
     loadPriceTypes();
@@ -1267,6 +1268,67 @@
       say(err.message);
       loadSettings();
     });
+  };
+
+  // Склад витрины. Как и вид цены: применять можно только то, что сначала
+  // посмотрели, — на другом складе части товаров может не быть в наличии
+  var stockState = { current: 0, checked: null };
+
+  function loadStocks(keepNote) {
+    var sel = document.getElementById('stockSelect');
+    api('/regos/stocks').then(function (r) {
+      stockState.current = r.current;
+      stockState.checked = null;
+      sel.innerHTML = '';
+      r.stocks.forEach(function (s) {
+        var o = el('option', null, s.name + (s.cashes ? '' : ' — касс нет') +
+          (s.id === r.current ? ' — сейчас у витрины' : ''));
+        o.value = String(s.id);
+        sel.appendChild(o);
+      });
+      sel.value = String(r.current);
+      document.getElementById('stockApply').disabled = true;
+      if (!keepNote) document.getElementById('stockNote').textContent = '';
+    }).catch(function (e) {
+      document.getElementById('stockNote').textContent = 'Склады не загрузились: ' + e.message;
+    });
+  }
+
+  function stockChange(apply) {
+    var id = Number(document.getElementById('stockSelect').value);
+    var note = document.getElementById('stockNote');
+    var applyBtn = document.getElementById('stockApply');
+    if (apply && stockState.checked !== id) return say('Сначала посмотрите, что изменится');
+    note.textContent = apply ? 'Применяем…' : 'Считаем…';
+    applyBtn.disabled = true;
+    api('/regos/stock?apply=' + (apply ? 'true' : 'false'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stock_id: id })
+    }).then(function (r) {
+      var text = 'Товаров на витрине: ' + r.total + '. В наличии: на «' + r.current.name +
+        '» — ' + r.current.in_stock + ', на «' + r.new.name + '» — ' + r.new.in_stock + '.';
+      if (r.missing.length) text += ' Нет в наличии на «' + r.new.name + '», например: ' +
+        r.missing.slice(0, 5).join(', ') + ' — такой заказ REGOS может не принять.';
+      if (r.applied) {
+        note.textContent = 'Применено. Новые заказы уходят на «' + r.new.name + '». ' + text +
+          (r.cash_reset ? ' Касса для заказов сброшена на общую очередь — выберите кассу нового склада.' : '');
+        say('Склад витрины переключён', 'ok');
+        loadStocks(true); loadCash(); loadPriceTypes();
+      } else {
+        note.textContent = text + (id === stockState.current ? ' Это текущий склад.' : '');
+        stockState.checked = id;
+        applyBtn.disabled = id === stockState.current;
+      }
+    }).catch(function (e) { note.textContent = ''; say(e.message); });
+  }
+
+  document.getElementById('stockCheck').onclick = function () { stockChange(false); };
+  document.getElementById('stockApply').onclick = function () { stockChange(true); };
+  document.getElementById('stockSelect').onchange = function () {
+    stockState.checked = null;
+    document.getElementById('stockApply').disabled = true;
+    document.getElementById('stockNote').textContent = '';
   };
 
   // Касса, на которую встают заказы. Названий у касс в REGOS нет, только id,

@@ -63,9 +63,6 @@ def main() -> int:
         if args.check:
             return check(client)
 
-        print(f"склад {config.STOCK_ID}, тип цены {config.PRICE_TYPE_ID}"
-              + (f", группы {config.ITEM_GROUP_IDS}" if config.ITEM_GROUP_IDS else ""))
-
         init_db()
         if not args.dry_run:
             # через sync_run: не пересечься с кнопкой в панели и оставить

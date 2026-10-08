@@ -18,8 +18,37 @@ REGOS_KEY = os.getenv("REGOS_KEY", "")
 # Пара обязана быть согласованной, иначе витрина покажет цены другой точки.
 # Метод Item/GetExt без price_type_id молча берёт первый тип по id — то есть
 # цены SAMPI для любого склада. Поэтому оба значения всегда передаются явно.
+#
+# Оба выбираются в панели («Состав каталога»), окружение — только начальные
+# значения: склад см. stock_id(), вид цены — app/regos/prices.py.
 STOCK_ID = int(os.getenv("REGOS_STOCK_ID", "5"))
 PRICE_TYPE_ID = int(os.getenv("REGOS_PRICE_TYPE_ID", "5"))
+
+SETTING_STOCK = "regos_stock_id"
+
+
+def stock_id(db) -> int:
+    """Склад витрины: с него остатки, на него уходят заказы, его кассы их видят.
+
+    Хранится в настройках, а не в окружении: магазин, который собирает
+    заказы, меняют из панели без доступа к серверу и перезапуска.
+    """
+    from app.models import Setting
+
+    row = db.get(Setting, SETTING_STOCK)
+    if row is not None and row.value.isdigit():
+        return int(row.value)
+    return STOCK_ID
+
+
+def save_stock(db, value: int) -> None:
+    from app.models import Setting
+
+    row = db.get(Setting, SETTING_STOCK)
+    if row is None:
+        db.add(Setting(name=SETTING_STOCK, value=str(value)))
+    else:
+        row.value = str(value)
 
 # Группы номенклатуры REGOS, попадающие в витрину. Пусто — берём весь каталог.
 # В базе 8050 позиций, из них с ценой 7151: тянуть всё на витрину колбасного

@@ -61,7 +61,7 @@ def already_pushed(client: RegosClient, number: str) -> int | None:
 
 
 def build_payload(order: Order, item_ids: dict[int, str],
-                  customer_id: int | None = None) -> dict:
+                  customer_id: int | None = None, stock_id: int | None = None) -> dict:
     """Тело запроса AddFull.
 
     item_ids — соответствие variant_id -> код REGOS (Variant.external_code).
@@ -74,7 +74,7 @@ def build_payload(order: Order, item_ids: dict[int, str],
     document = {
         "external_code": order.number,
         "from_id": config.ORDER_FROM_ID,
-        "stock_id": config.STOCK_ID,
+        "stock_id": stock_id or config.STOCK_ID,
         # вид цены, по которому считался заказ: администратор мог с тех пор
         # переключить витрину на другой, а документ должен совпасть с заказом
         "price_type_id": order.price_type_id or config.PRICE_TYPE_ID,
@@ -190,12 +190,12 @@ def _receipt_lines(order: Order) -> str:
 
 
 def push_order(client: RegosClient, order: Order, item_ids: dict[int, str],
-               cash_id: int = 0) -> int:
+               cash_id: int = 0, stock_id: int | None = None) -> int:
     """Отправляет заказ в REGOS. Возвращает id созданного документа.
 
     Повторный вызов для уже выгруженного заказа ничего не создаёт и возвращает
     id существующего документа. cash_id — касса из панели (operating_cash),
-    0 — общая очередь склада.
+    0 — общая очередь склада; stock_id — склад витрины (config.stock_id).
     """
     if not config.orders_enabled():
         raise OrderPushError(
@@ -210,7 +210,7 @@ def push_order(client: RegosClient, order: Order, item_ids: dict[int, str],
     customer_id = ensure_customer(client, order)
     try:
         result = client.call(
-            "DocOrderDelivery/AddFull", build_payload(order, item_ids, customer_id)
+            "DocOrderDelivery/AddFull", build_payload(order, item_ids, customer_id, stock_id)
         )
     except RegosError as exc:
         # 1029 — не хватает остатка: витрина продала то, чего нет на складе.
@@ -317,7 +317,8 @@ def push_pending(db, client: RegosClient | None = None) -> dict:
     for order in orders:
         order.regos_attempts += 1
         try:
-            order.regos_document_id = push_order(client, order, codes, operating_cash(db))
+            order.regos_document_id = push_order(client, order, codes, operating_cash(db),
+                                                 config.stock_id(db))
             order.regos_error = None
             sent += 1
         except ConfirmError as exc:
@@ -410,7 +411,7 @@ def assign_cash(client: RegosClient, document_id: int, cash_id: int) -> None:
     log.info("Документ %s поставлен на кассу %s", document_id, cash_id)
 
 
-def cashes(client: RegosClient) -> list[dict]:
+def cashes(client: RegosClient, stock_id: int | None = None) -> list[dict]:
     """Кассы склада витрины и последняя смена на каждой.
 
     Названий у касс в REGOS нет, только id. Различить их можно по сменам:
@@ -422,7 +423,7 @@ def cashes(client: RegosClient) -> list[dict]:
 
     found = []
     for cash in rows(client.call("OperatingCash/Get", {})):
-        if (cash.get("stock") or {}).get("id") != config.STOCK_ID:
+        if (cash.get("stock") or {}).get("id") != (stock_id or config.STOCK_ID):
             continue
         sessions = rows(client.call("DocCashSession/Get", {"limit": 1, "offset": 0, "filters": [
             {"Field": "operating_cash_id", "Operator": "Equal", "Value": str(cash["id"])}]}))
@@ -601,7 +602,8 @@ def push_one(order_id: int) -> None:
         order.regos_attempts += 1
         try:
             order.regos_document_id = push_order(
-                RegosClient(), order, item_codes(db, [order]), operating_cash(db)
+                RegosClient(), order, item_codes(db, [order]), operating_cash(db),
+                config.stock_id(db),
             )
             order.regos_error = None
         except ConfirmError as exc:

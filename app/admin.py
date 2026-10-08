@@ -682,6 +682,7 @@ def push_order_to_regos(
     Нужно, когда автоматическая выгрузка исчерпала попытки или оператор
     исправил причину отказа — например, дал товару код REGOS.
     """
+    from app.regos import config as regos_config
     from app.regos.client import RegosClient, RegosError
     from app.regos.orders_push import (
         PUSHABLE, ConfirmError, OrderPushError, item_codes, operating_cash, push_order,
@@ -710,7 +711,8 @@ def push_order_to_regos(
     order.regos_attempts += 1
     try:
         order.regos_document_id = push_order(
-            RegosClient(), order, item_codes(db, [order]), operating_cash(db)
+            RegosClient(), order, item_codes(db, [order]), operating_cash(db),
+            regos_config.stock_id(db),
         )
         order.regos_error = None
         db.commit()
@@ -1259,7 +1261,7 @@ def price_types(db: Session = Depends(get_db), _: TelegramUser = Depends(require
         types = prices.fetch_types(RegosClient())
     except (RegosError, RuntimeError, OSError) as exc:
         raise HTTPException(status_code=502, detail=str(exc))
-    return {"current": prices.current(db), "types": types, "stock_id": config.STOCK_ID}
+    return {"current": prices.current(db), "types": types, "stock_id": config.stock_id(db)}
 
 
 @router.post("/regos/price-type")
@@ -1390,6 +1392,113 @@ def sync_now(user: TelegramUser = Depends(require_admin)):
     return {"running": True}
 
 
+class StockIn(BaseModel):
+    stock_id: int = Field(gt=0)
+
+
+def _rows(result):
+    return (result.get("result") if isinstance(result, dict) else result) or []
+
+
+@router.get("/regos/stocks")
+def regos_stocks(db: Session = Depends(get_db), _: TelegramUser = Depends(require_admin)):
+    """Склады REGOS, какой из них у витрины и сколько у каждого касс."""
+    from app.regos import config as regos_config
+    from app.regos.client import RegosClient, RegosError
+
+    if not regos_config.is_configured():
+        raise HTTPException(status_code=400, detail="Не задан ключ REGOS")
+    try:
+        client = RegosClient()
+        stocks = _rows(client.call("Stock/Get", {}))
+        cash_count: dict[int, int] = {}
+        for cash in _rows(client.call("OperatingCash/Get", {})):
+            sid = (cash.get("stock") or {}).get("id")
+            cash_count[sid] = cash_count.get(sid, 0) + 1
+    except (RegosError, RuntimeError, OSError) as exc:
+        raise HTTPException(status_code=502, detail=f"REGOS не ответил: {exc}")
+    return {
+        "current": regos_config.stock_id(db),
+        "stocks": [{"id": s["id"], "name": s.get("name") or f"Склад {s['id']}",
+                    "cashes": cash_count.get(s["id"], 0)}
+                   for s in stocks if not s.get("deleted_mark")],
+    }
+
+
+@router.post("/regos/stock")
+def change_stock(
+    data: StockIn,
+    apply: bool = Query(False, description="false — только показать, что изменится"),
+    db: Session = Depends(get_db),
+    user: TelegramUser = Depends(require_admin),
+):
+    """Переключить витрину на другой склад REGOS.
+
+    От склада зависят остатки и то, куда уходят заказы: их видят только кассы
+    этого склада. Предпросмотр (apply=false) показывает, сколько товаров
+    витрины на новом складе есть в наличии. Касса для заказов, выбранная
+    на старом складе, при переключении сбрасывается на общую очередь —
+    касса чужого склада заказ не примет.
+    """
+    from app.regos import config as regos_config, prices
+    from app.regos.client import RegosClient, RegosError
+    from app.regos.orders_push import operating_cash, save_operating_cash
+
+    if not regos_config.is_configured():
+        raise HTTPException(status_code=400, detail="Не задан ключ REGOS")
+    client = RegosClient()
+    try:
+        stocks = {s["id"]: s.get("name") or f"Склад {s['id']}"
+                  for s in _rows(client.call("Stock/Get", {})) if not s.get("deleted_mark")}
+        if data.stock_id not in stocks:
+            raise HTTPException(status_code=400, detail="Такого склада в REGOS нет")
+        variants = prices.storefront_variants(db)
+        codes = [v.external_code for v in variants]
+
+        def in_stock(stock_id):
+            have = set()
+            for start in range(0, len(codes), prices.CHUNK):
+                chunk = codes[start:start + prices.CHUNK]
+                for row in _rows(client.call("Item/GetExt", {
+                    "limit": len(chunk), "offset": 0, "filters": [
+                        {"Field": "stock_id", "Operator": "Equal", "Value": str(stock_id)},
+                        {"Field": "price_type_id", "Operator": "Equal",
+                         "Value": str(prices.current(db))},
+                        {"Field": "code", "Operator": "In",
+                         "Value": ",".join(str(int(c)) for c in chunk)}]})):
+                    qty = row.get("quantity") or {}
+                    common = (qty.get("common") if isinstance(qty, dict) else qty) or 0
+                    if common > 0:
+                        have.add(f"{int(row['item']['code']):06d}")
+            return have
+
+        current = regos_config.stock_id(db)
+        now_have = in_stock(current) if codes else set()
+        new_have = in_stock(data.stock_id) if codes else set()
+    except (RegosError, RuntimeError, OSError) as exc:
+        raise HTTPException(status_code=502, detail=f"REGOS не ответил: {exc}")
+
+    names = {v.external_code: f"{v.product.name} {v.weight}" for v in variants}
+    result = {
+        "applied": False,
+        "current": {"id": current, "name": stocks.get(current, f"Склад {current}"),
+                    "in_stock": len(now_have)},
+        "new": {"id": data.stock_id, "name": stocks[data.stock_id], "in_stock": len(new_have)},
+        "total": len(codes),
+        "missing": sorted(names[c] for c in codes if c not in new_have)[:10],
+        "cash_reset": False,
+    }
+    if apply and data.stock_id != current:
+        regos_config.save_stock(db, data.stock_id)
+        db.commit()
+        if operating_cash(db):
+            save_operating_cash(db, 0)
+            result["cash_reset"] = True
+        result["applied"] = True
+        log.info("Склад витрины: %s -> %s (%s)", current, data.stock_id, user.name)
+    return result
+
+
 class CashPatch(BaseModel):
     operating_cash_id: int = Field(ge=0)
 
@@ -1406,7 +1515,7 @@ def get_cash(db: Session = Depends(get_db), _: TelegramUser = Depends(require_ad
         data["error"] = "Не задан ключ REGOS"
         return data
     try:
-        data["cashes"] = cashes(RegosClient())
+        data["cashes"] = cashes(RegosClient(), regos_config.stock_id(db))
     except (RegosError, RuntimeError, OSError) as exc:
         data["error"] = f"REGOS не ответил: {exc}"
     return data
@@ -1423,12 +1532,13 @@ def set_cash(
     Действует на заказы, которые уйдут в REGOS после сохранения: уже
     выгруженные остаются, где стоят.
     """
+    from app.regos import config as regos_config
     from app.regos.client import RegosClient, RegosError
     from app.regos.orders_push import cashes, save_operating_cash
 
     if data.operating_cash_id:
         try:
-            known = {c["id"] for c in cashes(RegosClient())}
+            known = {c["id"] for c in cashes(RegosClient(), regos_config.stock_id(db))}
         except (RegosError, RuntimeError, OSError) as exc:
             raise HTTPException(status_code=502, detail=f"REGOS не ответил: {exc}")
         if data.operating_cash_id not in known:

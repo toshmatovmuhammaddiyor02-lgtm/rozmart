@@ -204,7 +204,7 @@ seen = []
 real_fetch = catalog_sync.fetch_items
 
 
-def spy(client_, groups=None, price_type_id=None):
+def spy(client_, groups=None, price_type_id=None, stock_id=None):
     seen.append(price_type_id)
     return []
 

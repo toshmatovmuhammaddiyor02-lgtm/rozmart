@@ -221,6 +221,17 @@ td a{color:#1C64F2}
           <button class="act" id="addCat">Добавить</button>
         </div>
 
+        <h3 style="margin:0 0 4px;font-size:15px">Склад магазина</h3>
+        <p class="meta" style="margin:0 0 12px;max-width:720px">С какого склада REGOS работает
+          витрина: на него уходят заказы, и видят их только кассы этого склада.
+          Цены задаются отдельно — «Цены на витрине» ниже.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+          <select id="stockSelect" style="max-width:320px"></select>
+          <button class="act blue" id="stockCheck">Посмотреть, что изменится</button>
+          <button class="act" id="stockApply" disabled>Применить</button>
+        </div>
+        <div class="meta" id="stockNote" style="margin-bottom:26px;max-width:720px"></div>
+
         <h3 style="margin:0 0 4px;font-size:15px">Отправка заказов в REGOS</h3>
         <label style="display:flex;gap:9px;align-items:center;margin:0 0 6px;cursor:pointer">
           <input type="checkbox" id="autoPush" style="width:auto">

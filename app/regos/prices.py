@@ -14,9 +14,10 @@
 Выбор хранится в настройках (Setting), а не в переменной окружения: меняет его
 администратор из панели, без доступа к серверу и перезапуска.
 
-Склад при этом не меняется: остатки и касса, куда уходят заказы, — по-прежнему
-REGOS_STOCK_ID. Вид цены другого магазина покажет на витрине его цены, но заказ
-уйдёт на кассу своего склада — с ценами витрины в документе.
+Склад при этом не меняется: остатки и касса, куда уходят заказы, — склад
+витрины (config.stock_id, тоже выбирается в панели). Вид цены другого магазина
+покажет на витрине его цены, но заказ уйдёт на кассу склада витрины — с ценами
+витрины в документе.
 """
 import logging
 
@@ -96,7 +97,7 @@ def fetch_types(client: RegosClient) -> list[dict]:
 
 
 def fetch_prices(client: RegosClient, price_type_id: int,
-                 codes: list[str]) -> dict[str, int | None]:
+                 codes: list[str], stock_id: int | None = None) -> dict[str, int | None]:
     """Цены нужных позиций по виду цены: код -> цена или None.
 
     Весь каталог (8050 позиций, полторы минуты) ради витрины из нескольких
@@ -109,7 +110,8 @@ def fetch_prices(client: RegosClient, price_type_id: int,
         result = client.call("Item/GetExt", {
             "limit": len(chunk), "offset": 0,
             "filters": [
-                {"Field": "stock_id", "Operator": "Equal", "Value": str(config.STOCK_ID)},
+                {"Field": "stock_id", "Operator": "Equal",
+                 "Value": str(stock_id or config.STOCK_ID)},
                 {"Field": "price_type_id", "Operator": "Equal", "Value": str(price_type_id)},
                 {"Field": "code", "Operator": "In",
                  "Value": ",".join(str(int(code)) for code in chunk)},
@@ -137,7 +139,8 @@ def _plan(db: Session, client: RegosClient, price_type_id: int):
     ценой она не изменится, какой бы вид цены ни выбрали.
     """
     variants = storefront_variants(db)
-    prices = fetch_prices(client, price_type_id, [v.external_code for v in variants])
+    prices = fetch_prices(client, price_type_id, [v.external_code for v in variants],
+                          config.stock_id(db))
     rows, stats = [], {"total": len(variants), "same": 0, "up": 0, "down": 0,
                        "lost": 0, "manual": 0}
     for v in variants:
