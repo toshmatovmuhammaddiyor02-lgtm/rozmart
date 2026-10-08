@@ -689,7 +689,15 @@ def set_fiscal_qr(db, order, url: str, background=None) -> None:
     order.fiscal_qr_url = url
     order.fiscal_qr_regos_at = None
     order.fiscal_qr_regos_tries = 0
+    from app import notify
+    receipt = notify.queue_receipt(db, order)
     db.commit()
+    if receipt is not None:
+        # чек покупателю в Telegram; не ушёл сразу — доберёт поток очереди
+        if background is not None:
+            background.add_task(notify.send_one, receipt.id)
+        else:
+            notify.send_one(receipt.id)
     if order.regos_document_id:
         if background is not None:
             background.add_task(send_fiscal_qr, order.id)

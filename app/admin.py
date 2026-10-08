@@ -226,6 +226,10 @@ class OrderDetail(OrderRow):
     # последний отказ доставщика и его причина
     courier_drop_note: str | None = None
     courier_drop_by: str | None = None
+    # через какую систему платили и ссылка на её фискальный чек: по ней
+    # панель рисует QR и печатает чек для пакета с заказом
+    pay_provider: str | None = None
+    fiscal_qr_url: str | None = None
     address: str
     delivery_slot: str
     comment: str | None
@@ -598,6 +602,8 @@ def get_order(
         courier_drop_by=order.courier_drop_by,
         regos_error=order.regos_error,
         regos_attempts=order.regos_attempts,
+        pay_provider=order.pay_provider,
+        fiscal_qr_url=order.fiscal_qr_url,
         address=order.address,
         delivery_slot=order.delivery_slot,
         comment=order.comment,

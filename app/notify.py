@@ -394,6 +394,61 @@ def staff_canceled(order: Order, source: str, lang: str = "ru") -> str:
     return text
 
 
+# ----------------------------------------------------- чек покупателю
+
+# Фискальный чек Payme и Click — покупателю в личный чат с магазинным ботом.
+# Это единственное, что бот пишет покупателю сам: свой заказ он видит
+# в приложении, а чек — документ, который должен остаться у него на руках.
+RECEIPT = "receipt"
+
+
+def receipt_text(order: Order) -> str:
+    """На двух языках сразу: язык покупателя у заказа не хранится."""
+    link = html.escape(order.fiscal_qr_url or "", quote=True)
+    number = esc(order.number)
+    return (f"🧾 Фискальный чек по заказу <b>{number}</b> · {money(order.total)}\n"
+            f'<a href="{link}">Открыть чек</a>\n\n'
+            f"🧾 <b>{number}</b> buyurtma bo'yicha fiskal chek · {money(order.total, 'uz')}\n"
+            f'<a href="{link}">Chekni ochish</a>')
+
+
+def queue_receipt(db, order: Order | None) -> Notification | None:
+    """Ставит чек покупателю в очередь — один раз на заказ. Коммит — на вызывающем."""
+    from app.telegram import BOT_TOKEN
+
+    if (order is None or not order.fiscal_qr_url or not order.telegram_id
+            or not BOT_TOKEN or not enabled()):
+        return None
+    already = db.scalar(select(Notification.id).where(
+        Notification.order_id == order.id, Notification.kind == RECEIPT))
+    if already:
+        return None
+    row = Notification(telegram_id=order.telegram_id, chat_id=None, order_id=order.id,
+                       kind=RECEIPT, text=receipt_text(order))
+    db.add(row)
+    return row
+
+
+def _deliver_receipt(row: Notification) -> bool:
+    """Чек покупателю — от магазинного бота: со служебным покупатель не знаком."""
+    from app.telegram import BOT_TOKEN
+
+    try:
+        call("sendMessage", {"chat_id": row.telegram_id, "text": row.text,
+                             "parse_mode": "HTML", "disable_web_page_preview": True},
+             token=BOT_TOKEN)
+    except NotifyError as exc:
+        row.error = str(exc)[:500]
+        # покупатель не открывал чат с ботом или заблокировал его — чек
+        # остаётся у него в Payme/Click, повторять бессмысленно
+        row.attempts = MAX_ATTEMPTS if exc.permanent else row.attempts + 1
+        log.info("Чек покупателю %s не ушёл: %s", row.telegram_id, exc)
+        return False
+    row.sent_at = utcnow()
+    row.error = None
+    return True
+
+
 def staff_chats(db) -> list[StaffChat]:
     return list(db.scalars(select(StaffChat).where(StaffChat.active)))
 
@@ -430,6 +485,8 @@ def send_many(notification_ids: list[int]) -> None:
 
 def deliver(db, row: Notification) -> bool:
     """Пытается отправить одно сообщение. True — ушло."""
+    if row.kind == RECEIPT:
+        return _deliver_receipt(row)
     # Доступ проверяем в момент отправки, а не когда клали в очередь: если его
     # успели отозвать, чат не должен получить заказ, «уже выписанный» на него
     chat = db.get(StaffChat, row.chat_id)

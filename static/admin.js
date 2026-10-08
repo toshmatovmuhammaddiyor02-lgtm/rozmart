@@ -452,6 +452,74 @@
       + ' · платёж ' + (o.provider_charge_id || o.payment_charge_id);
   }
 
+  // ------------------------------------------------- фискальный чек Payme/Click
+
+  var PROVIDERS = { payme: 'Payme', click: 'Click', paynet: 'Paynet', telegram: 'Telegram' };
+
+  function fiscalText(o) {
+    if (o.fiscal_qr_url) return 'есть — открыть';
+    if (o.payment_method !== 'online' || !o.paid_at) return '—';
+    return 'ещё не пришёл от ' + (PROVIDERS[o.pay_provider] || 'платёжной системы');
+  }
+
+  // QR рисуем сами (static/vendor/qrcode.js): ссылка на чек ведёт
+  // на ofd.soliq.uz, и картинку брать оттуда неоткуда
+  function qrSvg(url) {
+    var qr = qrcode(0, 'M');
+    qr.addData(url);
+    qr.make();
+    return qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+  }
+
+  function escHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    });
+  }
+
+  function num(v) { return String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ' '); }
+
+  // Листок в пакет с заказом: чековый принтер 58 или 80 мм — ширину задаёт
+  // сам принтер, листок тянется по ней. Печать через скрытый iframe: новое
+  // окно в Telegram и в части браузеров открыть не дадут
+  function printReceipt(o) {
+    var rows = o.items.map(function (i) {
+      return '<tr><td colspan="2">' + escHtml(i.product_name + ' ' + i.weight) + '</td></tr>' +
+        '<tr><td>' + i.quantity + ' x ' + num(i.price) + '</td><td class="r">' + num(i.sum) + '</td></tr>';
+    }).join('');
+    var paid = o.paid_at ? new Date(o.paid_at).toLocaleString('ru-RU') : '';
+    var html = '<!doctype html><html><head><meta charset="utf-8"><title>' + escHtml(o.number) + '</title>' +
+      '<style>@page{margin:2mm}body{font:12px/1.35 Arial,sans-serif;margin:0;padding:0 1.5mm;color:#000}' +
+      '.c{text-align:center}table{width:100%;border-collapse:collapse}td{padding:1px 0;vertical-align:top}' +
+      '.r{text-align:right;white-space:nowrap}.hr{border-top:1px dashed #000;margin:6px 0}' +
+      '.qr svg{width:42mm;height:42mm}.big{font-size:15px;font-weight:bold}</style></head><body>' +
+      '<div class="c big">ROZMART</div>' +
+      '<div class="c">Заказ ' + escHtml(o.number) + ' · ' + new Date(o.created_at).toLocaleString('ru-RU') + '</div>' +
+      '<div class="hr"></div><table>' + rows +
+      '<tr><td>Доставка</td><td class="r">' + (o.delivery_price ? num(o.delivery_price) : 'бесплатно') + '</td></tr>' +
+      '</table><div class="hr"></div>' +
+      '<table><tr><td class="big">ИТОГО</td><td class="r big">' + num(o.total) + ' сум</td></tr></table>' +
+      '<div>Оплачено онлайн: ' + escHtml(PROVIDERS[o.pay_provider] || 'картой') + (paid ? ', ' + paid : '') + '</div>' +
+      '<div class="hr"></div>' +
+      '<div>' + escHtml(o.customer_name) + ' · ' + escHtml(o.phone) + '</div>' +
+      '<div>' + escHtml(o.address) + '</div>' +
+      (o.fiscal_qr_url
+        ? '<div class="hr"></div><div class="c qr">' + qrSvg(o.fiscal_qr_url) + '</div>' +
+          '<div class="c">Фискальный чек · Fiskal chek<br>Отсканируйте QR-код</div>'
+        : '') +
+      '</body></html>';
+    var frame = document.createElement('iframe');
+    frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0';
+    document.body.appendChild(frame);
+    var doc = frame.contentWindow.document;
+    doc.open(); doc.write(html); doc.close();
+    setTimeout(function () {
+      frame.contentWindow.focus();
+      frame.contentWindow.print();
+      setTimeout(function () { frame.remove(); }, 2000);
+    }, 250);
+  }
+
   function openOrder(id) {
     api('/orders/' + id).then(function (o) {
       document.getElementById('paneTtl').textContent = 'Заказ ' + o.number;
@@ -474,6 +542,7 @@
         o.lat != null ? 'https://maps.google.com/?q=' + o.lat + ',' + o.lon : null],
        ['Доставка', o.delivery_slot],
        ['Оплата', paymentText(o)],
+       ['Фискальный чек', fiscalText(o), o.fiscal_qr_url || null],
        ['Доставщик', o.courier_name
           ? o.courier_name + ' · взял ' + new Date(o.courier_taken_at).toLocaleString('ru-RU')
             + (o.delivered_at ? ' · доставил ' + new Date(o.delivered_at).toLocaleString('ru-RU') : '')
@@ -517,10 +586,30 @@
       t.appendChild(tb);
       body.appendChild(t);
 
+      if (o.fiscal_qr_url) {
+        var qrBox = el('div');
+        qrBox.style.cssText = 'margin:14px 0 4px;display:flex;gap:12px;align-items:center';
+        var pic = el('div');
+        pic.style.cssText = 'width:120px;height:120px;flex:none';
+        pic.innerHTML = qrSvg(o.fiscal_qr_url);   // своя разметка библиотеки, не данные
+        pic.firstChild.style.cssText = 'width:120px;height:120px';
+        qrBox.appendChild(pic);
+        qrBox.appendChild(el('div', 'meta', 'QR фискального чека ' +
+          (PROVIDERS[o.pay_provider] || '') + '. Покупателю он ушёл в Telegram; ' +
+          'для пакета с заказом — «Печать чека».'));
+        body.appendChild(qrBox);
+      }
+
       // Кнопки только для разрешённых переходов: сервер всё равно проверит,
       // но показывать заведомо невозможное действие — врать оператору
       var foot = document.getElementById('paneFoot');
       foot.innerHTML = '';
+
+      if (o.payment_method === 'online' && o.paid_at) {
+        var pr = el('button', 'act blue', 'Печать чека');
+        pr.onclick = function () { printReceipt(o); };
+        foot.appendChild(pr);
+      }
 
       // Ручная отправка — на случай, когда автоматическая исчерпала попытки
       // или оператор устранил причину отказа
