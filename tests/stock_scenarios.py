@@ -196,6 +196,42 @@ db3 = SessionLocal()
 check(7, "config.stock_id читает выбор из базы", config.stock_id(db3) == 1)
 db3.close()
 
+# ------------------------------------------------------------ группа без товаров
+# Отмечена родительская группа, в выборку не попадает ничего — а цены
+# витрины всё равно обновляются запросом по кодам
+client.put("/api/admin/regos/groups", json={"group_ids": [109]}, headers=ADMIN)
+real_paginate = FakeRegos.paginate
+
+
+def empty_group(self, method, params):
+    if method == "Item/GetExt" and "group_id" in filters_of(params):
+        return iter([])
+    return real_paginate(self, method, params)
+
+
+FakeRegos.paginate = empty_group
+real_call = FakeRegos.call
+
+
+def new_price(self, method, params=None, **kw):
+    r = real_call(self, method, params, **kw)
+    if method == "Item/GetExt":
+        for row in r["result"]:
+            row["price"] = 41000.0
+    return r
+
+
+FakeRegos.call = new_price
+db4 = SessionLocal()
+report = catalog_sync.sync_catalog(db4, FakeRegos())
+v = db4.get(Variant, variant.id)
+check(9, "Группа без товаров: цена витрины всё равно обновилась",
+      v.price == 41000 and report.updated == 1 and len(report.price_changes) == 1,
+      (v.price, report.summary()))
+check(9, "…и товар остался на витрине", v.is_active)
+db4.close()
+FakeRegos.paginate, FakeRegos.call = real_paginate, real_call
+
 buh = TestClient(app, base_url="https://testserver")
 buh.post("/api/admin/login", json={"username": "buh", "password": "pass-12345"})
 check(8, "Бухгалтеру склад менять нельзя", buh.post(

@@ -244,12 +244,15 @@ def sync_catalog(
         apply_fiscal(variant, item)
         report.updated += 1
 
-    # Коды для фискального чека нужны у всего, что продаёт витрина. А витрина
-    # бывает шире выбранных групп: товар опубликовали, потом группу сняли
-    # с отбора — и в выборку выше он больше не попадает. Такие берём
-    # отдельным запросом по их кодам
+    # Витрина бывает шире выбранных групп: товар опубликовали, потом группу
+    # сняли с отбора (или отметили родительскую группу, а товары лежат
+    # в подгруппах) — и в выборку выше он не попадает. Цена и коды для чека
+    # нужны у всего, что продаёт витрина, поэтому такие берём отдельным
+    # запросом по их кодам. Группы решают только, какие новинки приезжают.
+    # 7–8 октября 2026 отмеченной была одна «Сыр» без своих позиций, и цены
+    # витрины сутки не обновлялись вовсе
     fill_fiscal(db, client, [v for v in prices.storefront_variants(db)
-                             if v.external_code not in seen], price_type_id)
+                             if v.external_code not in seen], price_type_id, report)
 
     # Исчезнувшие из REGOS — скрыть. Не удалять: на фасовку ссылаются
     # оформленные заказы (BR-09), а внешний ключ стоит на RESTRICT.
@@ -303,8 +306,12 @@ def _create_variant(db: Session, item: dict, price: int | None, barcode: str | N
 
 
 def fill_fiscal(db: Session, client: RegosClient, variants: list[Variant],
-                price_type_id: int) -> int:
-    """МХИК, код упаковки и НДС для фасовок вне выборки — по их кодам."""
+                price_type_id: int, report: SyncReport | None = None) -> int:
+    """МХИК, код упаковки и НДС для фасовок вне выборки — по их кодам.
+
+    С report (синхронизация каталога) — ещё и цена REGOS, как у фасовок
+    из выборки. Без него (карточка товара в панели) цены не трогаем.
+    """
     by_code = {v.external_code: v for v in variants}
     codes = list(by_code)
     stock_id = config.stock_id(db)
@@ -326,6 +333,15 @@ def fill_fiscal(db: Session, client: RegosClient, variants: list[Variant],
             if variant is not None:
                 apply_fiscal(variant, row["item"])
                 filled += 1
+                if report is not None:
+                    price = _price_to_sum(row.get("price"))
+                    if price is None:
+                        report.skipped_no_price += 1
+                    if variant.regos_price != price:
+                        report.price_changes.append((row["item"]["name"], variant.regos_price, price))
+                    prices.apply_regos_price(variant, price)
+                    variant.regos_group_id = (row["item"].get("group") or {}).get("id")
+                    report.updated += 1
     if variants:
         log.info("коды для чека по фасовкам витрины вне выборки: %s из %s", filled, len(variants))
     return filled
