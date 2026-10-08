@@ -1649,7 +1649,7 @@
       n.classList.toggle('on', n.dataset.go === view);
     });
     say('');
-    if (view === 'products') loadProducts();
+    if (view === 'products') { loadProducts(); loadSync(); }
     else if (view === 'orders') loadOrders();
     else if (view === 'payments') loadPaySwitches();
     else if (view === 'report') loadReport();
@@ -1686,6 +1686,76 @@
       button.textContent = was;
     }, 400);
   }
+
+  // ------------------------------------------------------------ обновление из REGOS
+  // Каталог и так обновляется сам каждые 30 минут; кнопка — чтобы не ждать,
+  // например после смены цены в REGOS. Идёт в фоне на сервере, здесь только
+  // опрашиваем, закончилось ли, и показываем итог
+  var syncPoll = null;
+  var syncWasRunning = false;
+
+  function syncTime(iso) {
+    return new Date(iso).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit',
+      hour: '2-digit', minute: '2-digit' });
+  }
+
+  function syncSummary(s) {
+    var l = s.last;
+    var every = ' Само обновляется каждые ' + s.every_minutes + ' минут.';
+    if (s.running) return 'Обновляется из REGOS… Это может занять минуту-две.';
+    if (!l) return 'Из REGOS ещё не обновлялось с момента появления кнопки.' + every;
+    var head = 'Из REGOS: ' + syncTime(l.at) + ' (' + l.source + ')';
+    if (!l.ok) return head + ' — не удалось: ' + l.error + every;
+    var parts = ['цен изменилось ' + l.price_changed, 'новых ' + l.created,
+                 'снято с витрины ' + l.hidden];
+    if (l.no_price) parts.push('без цены в REGOS ' + l.no_price);
+    return head + ' — ' + parts.join(', ') +
+      (l.created ? '. Новые — во вкладке «Не разобранные», скрыты до публикации' : '') +
+      '.' + every;
+  }
+
+  function loadSync() {
+    var btn = document.getElementById('regosSync');
+    var note = document.getElementById('regosSyncNote');
+    clearTimeout(syncPoll);
+    api('/regos/sync', { quiet: true }).then(function (s) {
+      btn.hidden = false; note.hidden = false;
+      btn.disabled = s.running;
+      btn.textContent = s.running ? 'Обновляется…' : 'Обновить из REGOS';
+      note.textContent = syncSummary(s);
+      note.style.color = s.last && !s.last.ok && !s.running ? '#C0392B' : '';
+      // какие цены поменялись — по наведению, чтобы не растягивать строку
+      note.title = s.last && s.last.price_changes && s.last.price_changes.length
+        ? s.last.price_changes.map(function (c) {
+            return c.name + ': ' + money(c.was) + ' → ' + money(c.now);
+          }).join('\n') + (s.last.price_changed > s.last.price_changes.length
+            ? '\n… и ещё ' + (s.last.price_changed - s.last.price_changes.length) : '')
+        : '';
+      if (s.running) {
+        syncWasRunning = true;
+        if (state.view === 'products') syncPoll = setTimeout(loadSync, 3000);
+      } else if (syncWasRunning) {
+        syncWasRunning = false;
+        if (s.last && s.last.ok) say('Каталог обновлён из REGOS', 'ok');
+        else if (s.last) say('Обновить из REGOS не удалось: ' + s.last.error);
+        loadCategoryFilter();
+        loadProducts();
+      }
+    }).catch(function () {
+      btn.hidden = true; note.hidden = true;   // нет доступа к составу каталога
+    });
+  }
+
+  document.getElementById('regosSync').onclick = function (e) {
+    e.target.disabled = true;
+    api('/regos/sync', { method: 'POST' }).then(function () {
+      syncWasRunning = true;
+      loadSync();
+    }).catch(function (err) {
+      say(err.message);
+      loadSync();
+    });
+  };
 
   document.getElementById('reloadProducts').onclick = function (e) {
     refreshButton(e.target, function () {

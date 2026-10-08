@@ -1364,6 +1364,32 @@ def set_regos_groups(
     return {"selected": sorted(set(data.group_ids))}
 
 
+@router.get("/regos/sync")
+def sync_state(db: Session = Depends(get_db), _: TelegramUser = Depends(require_admin)):
+    """Идёт ли сейчас обновление каталога из REGOS и чем кончилось последнее."""
+    from app.regos import sync_run
+
+    return {"running": sync_run.running(), "last": sync_run.last(db), "every_minutes": 30}
+
+
+@router.post("/regos/sync", status_code=202)
+def sync_now(user: TelegramUser = Depends(require_admin)):
+    """Обновить каталог из REGOS сейчас, не дожидаясь таймера.
+
+    То же, что делает таймер раз в 30 минут: цены, новинки (скрытыми
+    карточками), коды для чека, снятие удалённого в REGOS. Идёт в фоне;
+    итог — в GET /regos/sync.
+    """
+    from app.regos import config as regos_config, sync_run
+
+    if not regos_config.is_configured():
+        raise HTTPException(status_code=400, detail="Не задан ключ REGOS")
+    if sync_run.start(f"вручную · {user.name}") is None:
+        raise HTTPException(status_code=409, detail="Обновление из REGOS уже идёт")
+    log.info("Обновление каталога из REGOS запущено вручную: %s", user.name)
+    return {"running": True}
+
+
 class AutoPushPatch(BaseModel):
     enabled: bool
 

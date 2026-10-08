@@ -20,6 +20,7 @@ import sys
 
 from app.db import SessionLocal, init_db
 from app.regos import config
+from app.regos import sync_run
 from app.regos.catalog_sync import sync_catalog
 from app.regos.client import RegosClient, RegosError, account_info
 
@@ -66,16 +67,25 @@ def main() -> int:
               + (f", группы {config.ITEM_GROUP_IDS}" if config.ITEM_GROUP_IDS else ""))
 
         init_db()
+        if not args.dry_run:
+            # через sync_run: не пересечься с кнопкой в панели и оставить
+            # панели итог — когда обновлялось и что поменялось
+            try:
+                result = sync_run.run("по расписанию", client, with_barcodes=not args.no_barcodes)
+            except sync_run.Busy:
+                print("Обновление уже идёт (запущено из панели) — этот запуск пропущен")
+                return 0
+            for change in result["price_changes"]:
+                print(f"  цена: {change['name']}: {change['was']} -> {change['now']}")
+            print(f"создано {result['created']}, обновлено {result['updated']}, "
+                  f"скрыто {result['hidden']}, без цены {result['no_price']}, "
+                  f"изменений цены {result['price_changed']}")
+            return 0
         db = SessionLocal()
         try:
-            report = sync_catalog(
-                db, client,
-                with_barcodes=not args.no_barcodes,
-                commit=not args.dry_run,
-            )
-            if args.dry_run:
-                db.rollback()
-                print("(dry-run: изменения отменены, в базу ничего не записано)")
+            report = sync_catalog(db, client, with_barcodes=not args.no_barcodes, commit=False)
+            db.rollback()
+            print("(dry-run: изменения отменены, в базу ничего не записано)")
             for name, was, now in report.price_changes[:20]:
                 print(f"  цена: {name}: {was} -> {now}")
             if len(report.price_changes) > 20:
