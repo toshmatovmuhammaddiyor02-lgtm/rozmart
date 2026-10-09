@@ -371,7 +371,16 @@ def reply(request_id, result=None, error: PaynetError | None = None, status: int
     return JSONResponse(body, status_code=status, headers=CORS)
 
 
+def strip_keys(value):
+    """Ключи — без пробелов по краям, на всех уровнях. В тест-кейсах Paynet
+    (TEST CASE new.pdf) параметр приходит как « fields », а внутри — « client_id »."""
+    if isinstance(value, dict):
+        return {str(k).strip(): strip_keys(v) for k, v in value.items()}
+    return value
+
+
 def process(db: Session, background: BackgroundTasks, method: str, params: dict):
+    params = strip_keys(params)
     try:
         return METHODS[method](db, params, background), None
     except PaynetError as exc:

@@ -284,6 +284,11 @@ check(18, "Ни заказов, ни сообщений сотрудникам",
       and s.query(Notification).count() == notes_before)
 s.close()
 from app import payments_report  # noqa: E402
+r = rpc("GetInformation", {"serviceId": 155, " fields ": {" order_id ": "1000001"}}).json()
+check(19, "Ключ « fields » с пробелами (как в TEST CASE Paynet) — понимаем",
+      (r.get("result") or {}).get("status") == 0, r)
+check(19, "…и несуществующий клиент по нему — 302",
+      code(rpc("GetInformation", {"serviceId": 155, " fields ": {"order_id": "9999999"}})) == 302)
 payments.PAYNET_TEST = False
 check(18, "В боевом режиме тестового счёта нет — 302",
       code(rpc("GetInformation", {"serviceId": 155, "fields": {"order_id": "1000001"}})) == 302)
