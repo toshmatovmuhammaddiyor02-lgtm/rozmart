@@ -163,7 +163,8 @@ def check_service(params: dict) -> None:
         service = int(params.get("serviceId"))
     except (TypeError, ValueError):
         raise err(411)
-    if str(service) != payments.PAYNET_SERVICE_ID:
+    # пока номера нет, принимаем тестовый номер Paynet — см. paynet_endpoint_ready
+    if payments.PAYNET_SERVICE_ID and str(service) != payments.PAYNET_SERVICE_ID:
         raise err(305)
 
 
@@ -355,7 +356,7 @@ async def paynet_not_post():
 @router.post(WEBHOOK_PATH, include_in_schema=False)
 async def paynet_endpoint(request: Request, background: BackgroundTasks,
                           db: Session = Depends(get_db)):
-    if not payments.provider_enabled("paynet") \
+    if not payments.paynet_endpoint_ready() \
             or not authorized(request.headers.get("Authorization")):
         # так требует Paynet: без верного логина и пароля — HTTP 401
         return reply(None, error=err(412), status=401)

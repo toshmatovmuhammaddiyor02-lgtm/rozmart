@@ -181,6 +181,15 @@ def provider_enabled(provider: str) -> bool:
     return provider in PROVIDERS and configured(provider)
 
 
+def paynet_endpoint_ready() -> bool:
+    """Отвечать ли Paynet. Хватает логина и пароля: номер сервиса Paynet
+    выдаёт после того, как прогонит свои тесты на нашем адресе, — без ответа
+    до номера дело бы не дошло. Покупателям Paynet появится только с номером
+    (configured), так что до него платить через Paynet некому, кроме тестов."""
+    refresh()
+    return "paynet" in PROVIDERS and bool(PAYNET_LOGIN and PAYNET_PASSWORD)
+
+
 def active() -> list[str]:
     """Включённые и настроенные способы — в порядке PAYMENT_PROVIDERS."""
     return [p for p in PROVIDERS if configured(p)]

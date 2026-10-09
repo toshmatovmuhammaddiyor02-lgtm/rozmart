@@ -246,6 +246,17 @@ inv = client.post(f"/api/orders/{new_order('paynet-key-004')['number']}/invoice"
 check(16, "Приложению — что ввести в Paynet", inv.get("kind") == "paynet" and inv.get("order").isdigit()
       and inv.get("amount") and inv.get("link") is None, inv)
 
+# До номера сервиса: логин и пароль уже переданы Paynet, номера ещё нет.
+# Адрес должен отвечать — иначе Paynet не прогонит тесты и номер не выдаст
+early = new_order("paynet-key-005")["number"]
+payments.PAYNET_SERVICE_ID = ""
+r = rpc("GetInformation", {"serviceId": 777, "fields": {"client_id": early}})
+check(17, "Номера сервиса ещё нет — Paynet получает ответ (тесты пройдут)",
+      r.status_code == 200 and r.json().get("result") is not None, r.text[:200])
+check(17, "…без пароля по-прежнему 401", rpc("GetInformation", {"serviceId": 777}, headers={}).status_code == 401)
+check(17, "…а покупатели Paynet не видят, пока номера нет", "paynet" not in payments.active())
+payments.PAYNET_SERVICE_ID = "155"
+
 failed = [r for r in results if not r[2]]
 print(f"\nИтого проверок: {len(results)}, не прошло: {len(failed)}")
 sys.exit(1 if failed else 0)
