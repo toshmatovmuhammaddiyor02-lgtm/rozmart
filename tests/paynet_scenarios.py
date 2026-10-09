@@ -257,6 +257,38 @@ check(17, "…без пароля по-прежнему 401", rpc("GetInformatio
 check(17, "…а покупатели Paynet не видят, пока номера нет", "paynet" not in payments.active())
 payments.PAYNET_SERVICE_ID = "155"
 
+# Тестовый счёт: Paynet гоняет сценарии сколько угодно раз, заказы не трогаем
+from app import paynet as paynet_module  # noqa: E402
+from app.models import Notification  # noqa: E402
+payments.PAYNET_TEST = True
+s = SessionLocal()
+orders_before = s.query(Order).count()
+notes_before = s.query(Notification).count()
+s.close()
+r = rpc("GetInformation", {"serviceId": 155, "fields": {"order_id": "1000001"}}).json()
+check(18, "Тестовый счёт: сумма 5 000 сум", (r.get("result") or {}).get("fields", {}).get("amount") == 500000, r)
+check(18, "Неверная сумма — 413", code(rpc("PerformTransaction", perform_params("1700000000001", 100, "1000001"))) == 413)
+r = rpc("PerformTransaction", perform_params("1700000000002", 500000, "1000001")).json()
+check(18, "Оплата проведена", (r.get("result") or {}).get("providerTrnId"), r)
+check(18, "Повтор той же транзакции — 201",
+      code(rpc("PerformTransaction", perform_params("1700000000002", 500000, "1000001"))) == 201)
+r = rpc("CheckTransaction", {"serviceId": 155, "transactionId": "1700000000002"}).json()
+check(18, "Проверка — проведена (1)", r["result"]["transactionState"] == 1)
+r = rpc("GetStatement", {"serviceId": 155, "dateFrom": now_local(-60), "dateTo": now_local(60)}).json()
+check(18, "В выписке есть", any(x["transactionId"] == 1700000000002 for x in r["result"]["statements"]))
+r = rpc("CancelTransaction", {"serviceId": 155, "transactionId": "1700000000002"}).json()
+check(18, "Отмена — 2, повторная отмена — 202", r["result"]["transactionState"] == 2 and code(
+    rpc("CancelTransaction", {"serviceId": 155, "transactionId": "1700000000002"})) == 202)
+s = SessionLocal()
+check(18, "Ни заказов, ни сообщений сотрудникам", s.query(Order).count() == orders_before
+      and s.query(Notification).count() == notes_before)
+s.close()
+from app import payments_report  # noqa: E402
+payments.PAYNET_TEST = False
+check(18, "В боевом режиме тестового счёта нет — 302",
+      code(rpc("GetInformation", {"serviceId": 155, "fields": {"order_id": "1000001"}})) == 302)
+payments.PAYNET_TEST = True
+
 failed = [r for r in results if not r[2]]
 print(f"\nИтого проверок: {len(results)}, не прошло: {len(failed)}")
 sys.exit(1 if failed else 0)

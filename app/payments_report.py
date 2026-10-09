@@ -172,6 +172,8 @@ def collect(db: Session, day_from: date, day_to: date) -> list[dict]:
     # Paynet: проведённые и отменённые Paynet после проведения
     for tx in db.scalars(select(PaynetTransaction).where(
             PaynetTransaction.created_at >= start, PaynetTransaction.created_at < end)):
+        if tx.order_number == "TEST-PAYNET":
+            continue                        # тестовый счёт Paynet — не деньги
         order = order_of(tx.order_id)
         refunded = tx.state == 2
         rows.append(_row("paynet", tx.created_at, order, tx.order_number,

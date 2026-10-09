@@ -56,6 +56,16 @@ FIELD = os.getenv("PAYNET_FIELD", "order_id").strip() or "order_id"
 # payments.PAYNET_PAY_URL (задаётся в панели). Подстановки: {service}, {order},
 # {amount} (в сумах). Пусто — покупателю показываем, что ввести в Paynet
 
+# Тестовый счёт для проверок Paynet. Их тестер гоняет одни и те же сценарии
+# много раз: оплата, проверка, отмена, выписка. На настоящем заказе каждый
+# прогон стоил бы нового заказа, сообщений сотрудникам и документа на кассе.
+# Поэтому есть счёт, который ведёт себя как заказ на TEST_AMOUNT сумов, но ни
+# заказов, ни кассы, ни сотрудников не трогает. Работает, только пока Paynet
+# в тестовом режиме (PAYNET_TEST): в боевом такого «заказа» нет.
+TEST_ACCOUNT = os.getenv("PAYNET_TEST_ACCOUNT", "1000001").strip()
+TEST_AMOUNT = 5000
+TEST_NUMBER = "TEST-PAYNET"
+
 TASHKENT = timezone(timedelta(hours=5))
 SUCCESS, CANCELED, NOT_FOUND = 1, 2, 3
 ORDER_PREFIX = "RB-"
@@ -135,6 +145,11 @@ def order_number(params: dict) -> str:
     return number
 
 
+def is_test_account(number: str) -> bool:
+    return bool(payments.PAYNET_TEST and TEST_ACCOUNT
+                and number in (ORDER_PREFIX + TEST_ACCOUNT, TEST_ACCOUNT.upper()))
+
+
 def find_order(db: Session, number: str) -> Order:
     order = db.scalar(select(Order).where(Order.number == number))
     if order is None:
@@ -179,7 +194,12 @@ def tx_id(params: dict) -> str:
 
 def get_information(db: Session, params: dict) -> dict:
     check_service(params)
-    order = find_order(db, order_number(params))
+    number = order_number(params)
+    if is_test_account(number):
+        return {"status": 0, "timestamp": stamp(), "fields": {
+            FIELD: TEST_ACCOUNT, "name": "Test P.", "amount": TEST_AMOUNT * payments.MINOR,
+            "description": "ROZMART, тестовый счёт Paynet"}}
+    order = find_order(db, number)
     payable(order)
     # покупатель в Paynet смотрит на этот заказ: пока он платит, автоотмена
     # его не трогает
@@ -208,7 +228,23 @@ def perform(db: Session, params: dict, background: BackgroundTasks) -> dict:
     if db.scalar(select(PaynetTransaction).where(PaynetTransaction.paynet_id == paynet_id)):
         raise err(201)
 
-    order = find_order(db, order_number(params))
+    number = order_number(params)
+    if is_test_account(number):
+        if int(amount) != amount or int(amount) != TEST_AMOUNT * payments.MINOR:
+            raise err(413)
+        tx = PaynetTransaction(paynet_id=paynet_id, order_id=None, order_number=TEST_NUMBER,
+                               amount=int(amount), state=SUCCESS, created_at=utcnow())
+        db.add(tx)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            raise err(201)
+        log.info("Paynet: тестовый платёж %s", paynet_id)
+        return {"providerTrnId": tx.id, "timestamp": stamp(tx.created_at),
+                "fields": {FIELD: TEST_ACCOUNT}}
+
+    order = find_order(db, number)
     payable(order)
     if int(amount) != amount or int(amount) != order.total * payments.MINOR:
         log.warning("Paynet: заказ %s, сумма %s, а в заказе %s",
