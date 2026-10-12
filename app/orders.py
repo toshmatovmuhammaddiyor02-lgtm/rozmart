@@ -154,6 +154,15 @@ def delivery_zone(
             "district": zones.name(district, lang) if district else None}
 
 
+@router.get("/delivery-zone/map")
+def delivery_zone_map(response: Response, db: Session = Depends(get_db)):
+    """Районы доставки для карты в приложении — чтобы было видно, куда возим."""
+    codes = zones.allowed(db)
+    # меняется редко, но после правки в панели должно доехать быстро
+    response.headers["Cache-Control"] = "public, max-age=300"
+    return {"enabled": bool(codes), "districts": zones.map_shapes(tuple(codes))}
+
+
 @router.post("/orders", response_model=OrderOut, status_code=201)
 def create_order(
     data: OrderIn,

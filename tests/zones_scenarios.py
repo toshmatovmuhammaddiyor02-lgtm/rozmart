@@ -136,9 +136,19 @@ r = client.get("/api/delivery-zone", params={"lat": CHILONZOR[0], "lon": CHILONZ
                headers={"X-Lang": "uz"}).json()
 check(9, "…для Чиланзара — «можно», район по-узбекски", r["ok"] and r["district"] == "Chilonzor tumani", r)
 
+# ------------------------------------------------------------ карта районов в приложении
+m = client.get("/api/delivery-zone/map").json()
+codes = sorted(d["code"] for d in m["districts"])
+points = sum(len(r) for d in m["districts"] for r in d["rings"])
+check(11, "Карта: 7 районов доставки, упрощённые границы", m["enabled"] and codes == sorted(zones.STARTED_WITH)
+      and 200 < points < 1500, (codes, points))
+first = m["districts"][0]["rings"][0][0]
+check(11, "Точки — [широта, долгота] (как ждёт Leaflet)", 41 < first[0] < 42 and 69 < first[1] < 70, first)
+
 # ------------------------------------------------------------ снять ограничение
 client.put("/api/admin/delivery-zones", json={"codes": []}, headers=ADMIN)
 check(10, "Ничего не отмечено — снова без ограничений", order(SERGELI).status_code == 201)
+check(11, "…и на карте зон нет", client.get("/api/delivery-zone/map").json() == {"enabled": False, "districts": []})
 
 failed = [r for r in results if not r[2]]
 print(f"\nИтого проверок: {len(results)}, не прошло: {len(failed)}")

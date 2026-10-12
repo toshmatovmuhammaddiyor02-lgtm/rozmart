@@ -94,6 +94,47 @@ def served_names(db, lang: str) -> str:
     return ", ".join(name(d, lang) for d in districts() if d["code"] in codes)
 
 
+# Для карты в приложении границы упрощаем: 600 точек на район телефону
+# рисовать ни к чему, а 30 метров на глаз не видны. Заказ проверяется
+# по точным границам (district_at), так что упрощение на него не влияет
+MAP_TOLERANCE = 0.0003       # градуса, около 30 м
+
+
+def _simplify(ring: list, tol: float = MAP_TOLERANCE) -> list:
+    """Рамер — Дуглас — Пейкер, без рекурсии: кольцо бывает в сотни точек."""
+    if len(ring) < 4:
+        return ring
+    keep = [False] * len(ring)
+    keep[0] = keep[-1] = True
+    stack = [(0, len(ring) - 1)]
+    while stack:
+        a, b = stack.pop()
+        (x1, y1), (x2, y2) = ring[a], ring[b]
+        dx, dy = x2 - x1, y2 - y1
+        norm = (dx * dx + dy * dy) ** 0.5
+        far, far_i = 0.0, None
+        for i in range(a + 1, b):
+            x, y = ring[i]
+            # у замкнутого кольца концы совпадают — тогда расстояние до точки
+            d = (abs(dy * (x - x1) - dx * (y - y1)) / norm if norm
+                 else ((x - x1) ** 2 + (y - y1) ** 2) ** 0.5)
+            if d > far:
+                far, far_i = d, i
+        if far_i is not None and far > tol:
+            keep[far_i] = True
+            stack += [(a, far_i), (far_i, b)]
+    return [p for p, k in zip(ring, keep) if k]
+
+
+@lru_cache(maxsize=8)
+def map_shapes(codes: tuple[str, ...]) -> list[dict]:
+    """Обслуживаемые районы для карты: кольца точками [широта, долгота]."""
+    wanted = set(codes)
+    return [{"code": d["code"], "ru": d["ru"], "uz": d["uz"],
+             "rings": [[[y, x] for x, y in _simplify(r)] for r in d["outer"]]}
+            for d in districts() if d["code"] in wanted]
+
+
 def check(db, lat: float | None, lon: float | None, lang: str = "ru") -> tuple[bool, str, dict | None]:
     """Можно ли везти в эту точку. (да/нет, текст для покупателя, район)."""
     codes = allowed(db)

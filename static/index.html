@@ -151,6 +151,14 @@ body.tabs-on .ft{bottom:calc(var(--tabs) + var(--safe-bot));padding-bottom:12px}
   display:flex;align-items:center;justify-content:center}
 /* пока ищем координаты — значок крутится: без этого кажется, что кнопка мертва */
 .map-here.busy{color:#8A8A8A}
+.map-legend{position:absolute;left:12px;bottom:14px;right:72px;z-index:400;display:flex;gap:8px;align-items:center;
+  background:rgba(255,255,255,.94);border-radius:12px;padding:8px 10px;font-size:12.5px;line-height:1.3;
+  box-shadow:0 2px 8px rgba(0,0,0,.15)}
+.map-legend .sw{flex:none;width:16px;height:16px;border-radius:4px;background:rgba(227,6,19,.18);border:2px solid #E30613}
+.map-legend.out{background:#FDECEA;color:#C62828}
+.leaflet-tooltip.zone-label{background:transparent;border:none;box-shadow:none;color:#B00510;font-weight:600;font-size:12px;
+  text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff}
+.leaflet-tooltip.zone-label::before{display:none}
 .map-here.busy i{animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 .map-hint{font-size:13.5px;color:#333;margin-bottom:10px;line-height:1.45;min-height:19px}
@@ -359,6 +367,7 @@ body.tabs-on .ft{bottom:calc(var(--tabs) + var(--safe-bot));padding-bottom:12px}
       <button data-layer="satellite" data-i18n="satellite">Спутник</button>
       <button data-layer="scheme" data-i18n="scheme">Схема</button>
     </div>
+    <div class="map-legend hidden" id="map-legend"><span class="sw"></span><span id="map-legend-text"></span></div>
     <button class="map-here" id="map-here" data-i18n-title="my_location" title="Моё местоположение">
       <i class="ti ti-current-location"></i></button>
   </div>

@@ -142,6 +142,8 @@ const I18N = {
     addr_lookup: "Определяем адрес…",
     addr_unknown: "Адрес не определился — напишите его словами",
     map_hint: "Подвиньте карту так, чтобы булавка встала на ваш дом.",
+    zone_legend: "Красным — районы, куда мы доставляем",
+    zone_out: "Сюда пока не доставляем — выберите место в красной зоне",
     addr_house: "{a}, дом {h}",
     point_ok: "Адрес и дом взяты с карты", point_change: "изменить точку", point_drop: "убрать",
     tg_only: "Оплатить картой можно только в приложении Telegram.",
@@ -244,6 +246,8 @@ const I18N = {
     addr_lookup: "Manzil aniqlanmoqda…",
     addr_unknown: "Manzil aniqlanmadi — uni so'z bilan yozing",
     map_hint: "Xaritani surib, belgini uyingiz ustiga qo'ying.",
+    zone_legend: "Qizil rangda — yetkazib beradigan tumanlarimiz",
+    zone_out: "Bu yerga hozircha yetkazmaymiz — qizil hududdan joy tanlang",
     addr_house: "{a}, {h}-uy",
     point_ok: "Manzil va uy xaritadan olindi", point_change: "nuqtani o'zgartirish",
     point_drop: "olib tashlash",
@@ -1397,7 +1401,61 @@ async function openMap(prefix) {
   // и без этого рисует карту в четверть экрана
   setTimeout(() => mapView.invalidateSize(), 60);
   scheduleLookup();
+  drawZones();
   if (!point) locateMe(true);
+}
+
+// ---------- районы доставки на карте ----------
+
+let zoneData = null;        // ответ /api/delivery-zone/map, один раз за запуск
+let zoneLayer = null;
+
+/** Закрашивает районы, куда возим. Без них человек узнаёт про зону, только
+ * поставив булавку, — а так видно сразу, где можно ставить. */
+async function drawZones() {
+  if (!mapView) return;
+  try {
+    if (!zoneData) {
+      const r = await fetch("/api/delivery-zone/map");
+      if (!r.ok) return;
+      zoneData = await r.json();
+    }
+  } catch (error) {
+    console.error(error);    // нет зон на карте — заказ всё равно проверит сервер
+    return;
+  }
+  if (!zoneData.enabled) return;
+  if (!zoneLayer) {
+    zoneLayer = L.layerGroup(zoneData.districts.map((d) =>
+      L.polygon(d.rings, { color: "#E30613", weight: 2, fillColor: "#E30613",
+                           fillOpacity: 0.12, interactive: false })
+        .bindTooltip(LANG === "uz" ? d.uz : d.ru,
+                     { permanent: true, direction: "center", className: "zone-label" })));
+  }
+  if (!mapView.hasLayer(zoneLayer)) zoneLayer.addTo(mapView);
+  mapView.off("moveend", markZone).on("moveend", markZone);
+  markZone();
+}
+
+function inRing(lat, lon, ring) {
+  let hit = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [y1, x1] = ring[i], [y2, x2] = ring[j];
+    if ((y1 > lat) !== (y2 > lat) && lon < (x2 - x1) * (lat - y1) / (y2 - y1) + x1) hit = !hit;
+  }
+  return hit;
+}
+
+/** Подпись под картой: внутри красной зоны булавка или нет. Точная проверка —
+ * на сервере; здесь — подсказка по упрощённым границам. */
+function markZone() {
+  const box = el("map-legend");
+  if (!zoneData || !zoneData.enabled || !mapView) return box.classList.add("hidden");
+  const c = mapView.getCenter();
+  const inside = zoneData.districts.some((d) => d.rings.some((r) => inRing(c.lat, c.lng, r)));
+  box.classList.remove("hidden");
+  box.classList.toggle("out", !inside);
+  el("map-legend-text").textContent = t(inside ? "zone_legend" : "zone_out");
 }
 
 function savedMapKind() {
