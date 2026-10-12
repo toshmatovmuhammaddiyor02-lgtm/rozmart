@@ -139,6 +139,18 @@ check(7, "В конце — товары, доставка и итог",
 free_desc = build_payload(row, {variant.id: "003100"})["document"]["description"]
 check(7, "Бесплатная доставка так и написана", "Доставка: бесплатно" in free_desc)
 
+# Срок «Завтра до конца рабочего дня»: кассир видит в REGOS завтра 18:00 по Ташкенту
+from datetime import datetime, timezone  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+from app import notify  # noqa: E402
+late = SimpleNamespace(delivery_slot="Завтра до конца рабочего дня",
+                       created_at=datetime(2026, 10, 12, 16, 30))       # 21:30 по Ташкенту
+ts = orders_push.delivery_timestamp(late)
+local = datetime.fromtimestamp(ts, timezone.utc).astimezone(timezone.utc)
+check(8, "Срок в REGOS — завтра 18:00 по Ташкенту (13:00 UTC)",
+      local == datetime(2026, 10, 13, 13, 0, tzinfo=timezone.utc), local)
+check(8, "Сотрудникам по-узбекски", notify.slot(late, "uz") == "Ertaga ish kuni oxirigacha")
+
 failed = [r for r in results if not r[2]]
 print(f"\nИтого проверок: {len(results)}, не прошло: {len(failed)}")
 sys.exit(1 if failed else 0)

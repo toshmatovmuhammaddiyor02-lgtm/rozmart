@@ -291,6 +291,7 @@ STAFF_TEXTS = {
 
 # Срок доставки хранится в заказе по-русски — это значение из формы
 SLOTS_UZ = {
+    "Завтра до конца рабочего дня": "Ertaga ish kuni oxirigacha",
     "Как можно скорее": "Imkon qadar tezroq",
     "Сегодня вечером": "Bugun kechqurun",
     "Завтра утром": "Ertaga ertalab",
