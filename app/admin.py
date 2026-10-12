@@ -1226,6 +1226,31 @@ class DeliveryPriceIn(BaseModel):
     price: int = Field(ge=0, le=1_000_000)
 
 
+class ZonesPatch(BaseModel):
+    codes: list[str]
+
+
+@router.get("/delivery-zones")
+def get_delivery_zones(db: Session = Depends(get_db), _: TelegramUser = Depends(require_admin)):
+    """Районы Ташкента и какие из них обслуживаются."""
+    from app import zones
+
+    on = set(zones.allowed(db))
+    return {"districts": [{"code": d["code"], "name": d["ru"], "uz": d["uz"], "on": d["code"] in on}
+                          for d in zones.districts()],
+            "enabled": bool(on)}
+
+
+@router.put("/delivery-zones")
+def set_delivery_zones(data: ZonesPatch, db: Session = Depends(get_db),
+                       user: TelegramUser = Depends(require_admin)):
+    from app import zones
+
+    codes = zones.save(db, data.codes)
+    log.info("Районы доставки: %s (%s)", ", ".join(codes) or "без ограничений", user.name)
+    return get_delivery_zones(db, user)
+
+
 @router.get("/delivery-price")
 def admin_delivery_price(db: Session = Depends(get_db),
                          _: TelegramUser = Depends(require_admin)):

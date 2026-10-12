@@ -271,6 +271,18 @@ td a{color:#1C64F2}
         </div>
         <div class="meta" id="deliveryNote" style="margin-bottom:26px"></div>
 
+        <h3 style="margin:0 0 4px;font-size:15px">Районы доставки</h3>
+        <p class="meta" style="margin:0 0 12px;max-width:720px">Заказ принимается, только если
+          точка на карте, которую покупатель ставит на свой дом, — в отмеченном районе.
+          Из других районов приложение ответит, что сейчас оттуда заказать нельзя, и назовёт
+          районы, куда возим. Ничего не отмечено — заказ принимается откуда угодно.</p>
+        <div id="zones" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:6px 14px;max-width:760px;margin-bottom:10px"></div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+          <button class="act blue" id="zonesSave">Сохранить районы</button>
+          <span class="meta" id="zonesNote"></span>
+        </div>
+        <p class="meta" style="margin:0 0 26px">Границы районов — © участники OpenStreetMap.</p>
+
         <h3 style="margin:0 0 4px;font-size:15px">Цены на витрине</h3>
         <p class="meta" style="margin:0 0 12px">По какому виду цены REGOS продаёт витрина.
           Остатки и касса, куда уходят заказы, от этого не меняются — это склад

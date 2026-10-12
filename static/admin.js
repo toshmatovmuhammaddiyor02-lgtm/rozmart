@@ -1305,7 +1305,53 @@
       'Сейчас: ' + (r.price ? money(r.price) : 'бесплатно') + '.';
   }
 
+  // ------------------------------------------------- районы доставки
+
+  function loadZones() {
+    api('/delivery-zones').then(renderZones).catch(function (e) {
+      document.getElementById('zonesNote').textContent = 'Не загрузилось: ' + e.message;
+    });
+  }
+
+  function renderZones(r) {
+    var box = document.getElementById('zones');
+    box.innerHTML = '';
+    r.districts.forEach(function (d) {
+      var label = el('label');
+      label.style.cssText = 'display:flex;gap:8px;align-items:center;cursor:pointer';
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.style.width = 'auto';
+      cb.value = d.code;
+      cb.checked = d.on;
+      label.appendChild(cb);
+      label.appendChild(el('span', null, d.name + ' · ' + d.uz));
+      box.appendChild(label);
+    });
+    var on = r.districts.filter(function (d) { return d.on; }).length;
+    document.getElementById('zonesNote').textContent = r.enabled
+      ? 'Доставляем в ' + on + ' из ' + r.districts.length + ' районов'
+      : 'Ограничения нет: заказ принимается из любого места';
+  }
+
+  document.getElementById('zonesSave').onclick = function (e) {
+    var codes = Array.prototype.map.call(
+      document.querySelectorAll('#zones input:checked'), function (c) { return c.value; });
+    if (!codes.length && !confirm('Ни один район не отмечен — заказы будут приниматься '
+        + 'из любого места, в том числе из-за города. Сохранить?')) return;
+    e.target.disabled = true;
+    api('/delivery-zones', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ codes: codes })
+    }).then(function (r) {
+      renderZones(r);
+      say('Районы доставки сохранены', 'ok');
+    }).catch(function (err) { say(err.message); })
+      .then(function () { e.target.disabled = false; });
+  };
+
   function loadDelivery() {
+    loadZones();
     api('/delivery-price').then(showDelivery).catch(function (e) {
       document.getElementById('deliveryNote').textContent = 'Не загрузилось: ' + e.message;
     });

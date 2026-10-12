@@ -26,6 +26,7 @@ const state = {
   unpaidMinutes: 30,     // через сколько минут неоплаченный заказ отменяется
   paying: false,         // окно оплаты уже открывается
   point: { f: null, p: null },   // точка на карте: f — в заказе, p — в профиле
+  zone: null,                    // доставляем ли в точку заказа: ответ /api/delivery-zone
   // адрес, который мы сами подставили в поле. Нужен, чтобы отличить его
   // от набранного руками и не затереть чужой текст
   filled: { f: "", p: "" },
@@ -832,6 +833,7 @@ async function submitOrder() {
     return showError(t("fill_fields"));
   }
   if (needConsent) return showError(t("need_consent"));
+  if (state.zone && !state.zone.ok) return showError(state.zone.message);
   if (state.payment === "online") return showError(t("pick_online"));
 
   state.sending = true;
@@ -1038,6 +1040,7 @@ function applyProfile() {
   el("f-flat").value = p.flat || "";
   state.point.f = p.lat != null && p.lon != null ? { lat: p.lat, lon: p.lon } : null;
   renderPoint("f");
+  checkZone();
   // согласие берётся один раз: уже дано — больше не спрашиваем
   el("agree-box").classList.toggle("hidden", p.consent);
 
@@ -1645,7 +1648,25 @@ function saveMapPoint() {
     fillAddress(mapTarget, mapAddress);
   }
   renderPoint(mapTarget);
+  if (mapTarget === "f") checkZone();
   show(mapTarget === "f" ? "checkout" : "profile");
+}
+
+/** Доставляем ли в точку заказа. Спрашиваем сразу, как поставили булавку:
+ * узнать про чужой район после заполнения всей формы — обидно. Окончательно
+ * проверяет сервер при оформлении; молчание здесь заказу не мешает. */
+async function checkZone() {
+  state.zone = null;
+  const point = state.point.f;
+  if (!point) return renderPoint("f");
+  try {
+    const r = await fetch(`/api/delivery-zone?lat=${point.lat}&lon=${point.lon}`,
+      { headers: tgHeaders() });
+    if (r.ok && state.point.f === point) state.zone = await r.json();
+  } catch (error) {
+    console.error(error);
+  }
+  renderPoint("f");
 }
 
 /** Ставит найденный адрес в поле.
@@ -1667,6 +1688,7 @@ function fillAddress(prefix, address) {
 
 function clearPoint(prefix) {
   state.point[prefix] = null;
+  if (prefix === "f") state.zone = null;
   renderPoint(prefix);
 }
 
@@ -1675,10 +1697,15 @@ function renderPoint(prefix) {
   const point = state.point[prefix];
   box.classList.toggle("hidden", !point);
   if (!point) return;
+  const zone = prefix === "f" && state.zone && !state.zone.ok ? state.zone : null;
   box.innerHTML = `
-    <span class="ok">${t("point_ok")}</span>
+    <span class="${zone ? "bad" : "ok"}">${t("point_ok")}</span>
     <button data-map="${prefix}">${t("point_change")}</button>
-    <button data-drop-map="${prefix}">${t("point_drop")}</button>`;
+    <button data-drop-map="${prefix}">${t("point_drop")}</button>
+    ${zone ? `<div class="zone"></div>` : ""}`;
+  // текст сервера — textContent: в названиях районов ничего опасного нет,
+  // но вставлять ответ сервера разметкой незачем
+  if (zone) box.querySelector(".zone").textContent = zone.message;
 }
 
 // ---------- обновление свайпом сверху вниз ----------

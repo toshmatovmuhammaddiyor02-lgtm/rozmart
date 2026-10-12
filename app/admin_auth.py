@@ -211,6 +211,7 @@ _RULES = [
     ("/notify", "settings"),
     ("/couriers", "settings"),
     ("/delivery-price", "settings"),
+    ("/delivery-zones", "settings"),
     ("/cleanup", "settings"),
 ]
 

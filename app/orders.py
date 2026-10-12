@@ -6,7 +6,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from app import notify, order_status, payments, photos
+from app import i18n, notify, order_status, payments, photos, zones
 from app.db import get_db
 from app.models import Counter, Order, OrderItem, Setting, Variant
 from app.profile import save_customer
@@ -139,12 +139,28 @@ def to_out(order: Order) -> OrderOut:
     )
 
 
+@router.get("/delivery-zone")
+def delivery_zone(
+    lat: float | None = None,
+    lon: float | None = None,
+    db: Session = Depends(get_db),
+    x_lang: str | None = Header(default=None, alias="X-Lang"),
+):
+    """Доставляем ли в эту точку — приложение спрашивает, как только покупатель
+    поставил булавку, чтобы не заполнять форму зря."""
+    lang = i18n.lang_of(x_lang)
+    ok, why, district = zones.check(db, lat, lon, lang)
+    return {"enabled": bool(zones.allowed(db)), "ok": ok, "message": why,
+            "district": zones.name(district, lang) if district else None}
+
+
 @router.post("/orders", response_model=OrderOut, status_code=201)
 def create_order(
     data: OrderIn,
     background: BackgroundTasks,
     db: Session = Depends(get_db),
     user: TelegramUser | None = Depends(buyer),
+    x_lang: str | None = Header(default=None, alias="X-Lang"),
 ):
     """Создаёт заказ. Цены берутся из базы, а не из запроса клиента."""
     telegram_id = user.id if user else None
@@ -171,6 +187,12 @@ def create_order(
                 status_code=400,
                 detail="Оплата картой пока недоступна. Выберите оплату наличными.",
             )
+
+    # Зона доставки — по точке на карте (app/zones.py). Проверяет сервер:
+    # предупреждение в приложении — подсказка, а не защита
+    ok, why, _ = zones.check(db, data.lat, data.lon, i18n.lang_of(x_lang))
+    if not ok:
+        raise HTTPException(status_code=400, detail=why)
 
     quantities: dict[int, int] = {}
     for item in data.items:
