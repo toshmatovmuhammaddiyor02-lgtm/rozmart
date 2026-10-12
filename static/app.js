@@ -1416,7 +1416,7 @@ async function drawZones() {
   if (!mapView) return;
   try {
     if (!zoneData) {
-      const r = await fetch("/api/delivery-zone/map");
+      const r = await fetch("/api/delivery-zone/map", { cache: "no-store" });
       if (!r.ok) return;
       zoneData = await r.json();
     }

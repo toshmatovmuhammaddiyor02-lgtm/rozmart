@@ -158,8 +158,9 @@ def delivery_zone(
 def delivery_zone_map(response: Response, db: Session = Depends(get_db)):
     """Районы доставки для карты в приложении — чтобы было видно, куда возим."""
     codes = zones.allowed(db)
-    # меняется редко, но после правки в панели должно доехать быстро
-    response.headers["Cache-Control"] = "public, max-age=300"
+    # не кешируем: 11 КБ, а правка в панели (или в самих границах) должна
+    # доехать сразу — с max-age=300 Telegram показывал старую карту дольше
+    response.headers["Cache-Control"] = "no-store"
     return {"enabled": bool(codes), "districts": zones.map_shapes(tuple(codes))}
 
 
