@@ -89,6 +89,8 @@ got = {name: (zones.district_at(*p) or {}).get("code") for name, p in
 check(1, "Контрольные точки — в своих районах, Чирчик — ни в одном",
       all(k == v for k, v in got.items()), got)
 check(1, "В справочнике 12 районов Ташкента", len(zones.districts()) == 12)
+check(1, "Анклав Мирзо-Улугбекского у посёлка Улугбек (за городом) — не зона",
+      zones.district_at(41.4115, 69.4544) is None and zones.district_at(41.3281, 69.3194)["code"] == "mirzo_ulugbek")
 
 # ------------------------------------------------------------ пока не выбрано — без ограничений
 check(2, "Районы не выбраны — заказ без точки принимается", order().status_code == 201)

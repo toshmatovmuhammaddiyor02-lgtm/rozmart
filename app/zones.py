@@ -6,8 +6,10 @@
 
 Границы районов — из OpenStreetMap (app/data/tashkent_districts.json, собраны
 скриптом из отношений boundary=administrative, admin_level=6). Проверка —
-обычная «точка в многоугольнике»: у района бывает несколько колец (у Мирзо-
-Улугбекского есть анклав), дыр в ташкентских районах нет, но учитываем и их.
+обычная «точка в многоугольнике»; дыр в ташкентских районах нет, но учитываем
+и их. Берём только основной контур района: у Мирзо-Улугбекского в OSM есть
+анклав у посёлка Улугбек (Кибрайский район, за городом), и туда магазин не
+возит — заметили по карте в приложении 12.10.2026.
 
 Какие районы обслуживаются, выбирает администратор в панели. Пустой выбор —
 ограничения нет, заказ принимается из любой точки.
@@ -32,10 +34,15 @@ STARTED_WITH = ["chilonzor", "yakkasaroy", "mirobod", "yashnobod", "mirzo_ulugbe
 def districts() -> list[dict]:
     raw = json.loads(DATA.read_text(encoding="utf-8"))["districts"]
     for d in raw:
+        d["outer"] = [max(d["outer"], key=_area)]
         points = [p for ring in d["outer"] for p in ring]
         d["bbox"] = (min(p[0] for p in points), min(p[1] for p in points),
                      max(p[0] for p in points), max(p[1] for p in points))
     return raw
+
+
+def _area(ring: list) -> float:
+    return abs(sum(x1 * y2 - x2 * y1 for (x1, y1), (x2, y2) in zip(ring, ring[1:]))) / 2
 
 
 def _inside(lon: float, lat: float, ring: list) -> bool:
