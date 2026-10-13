@@ -191,7 +191,7 @@ def put_cfg(values):
 check(8, "Кривой ID кассы — отказ", put_cfg({"PAYME_MERCHANT_ID": "xyz"}).status_code == 400)
 check(8, "Буквы в номере сервиса — отказ", put_cfg({"PAYNET_SERVICE_ID": "15a"}).status_code == 400)
 check(8, "Короткий пароль — отказ", put_cfg({"PAYNET_PASSWORD": "123"}).status_code == 400)
-check(8, "ID кассы вместо ключа — отказ", put_cfg({"PAYME_KEY": "6abcdfe5cecc8697d1ce9261"})
+check(8, "ID кассы вместо ключа — отказ", put_cfg({"PAYME_KEY": "65f0c0ffee00000000aa11bb"})
       .status_code == 400 and put_cfg({"PAYME_KEY": "65f0c0ffee0000000000abcd"}).status_code == 400)
 check(8, "После отказа ключ прежний", client.get("/api/admin/payments", headers=ADMIN)
       .json()["config"]["PAYME_KEY"]["source"] == "server")
