@@ -150,7 +150,7 @@ r = rpc("GetInformation", {"serviceId": 155, "fields": {"client_id": "9989736100
 check(1, "GetInformation: заказа нет — 302", code(r) == 302, r.json())
 r = rpc("GetInformation", {"serviceId": 155, "fields": {"client_id": digits}}, request_id=12350)
 res = r.json().get("result") or {}
-check(2, "GetInformation: заказ есть — сумма и имя", r.json()["id"] == 12350 and res.get("status") == 0
+check(2, "GetInformation: заказ есть — сумма и имя", r.json()["id"] == 12350 and res.get("status") == "0"
       and res["fields"]["amount"] == amount and res["fields"]["name"] == "Javohir R.", res)
 check(2, "Время в ответе — ГГГГ-ММ-ДД чч:мм:сс", len(res.get("timestamp", "")) == 19
       and res["timestamp"][4] == "-" and res["timestamp"][13] == ":")
@@ -272,6 +272,10 @@ r = rpc("PerformTransaction", perform_params("1700000000002", 500000, "1000001")
 check(18, "Оплата проведена", (r.get("result") or {}).get("providerTrnId"), r)
 check(18, "Повтор той же транзакции — 201",
       code(rpc("PerformTransaction", perform_params("1700000000002", 500000, "1000001"))) == 201)
+check(18, "Оплаченный тестовый счёт закрыт: GetInformation — 302", code(rpc(
+    "GetInformation", {"serviceId": 155, "fields": {"order_id": "1000001"}})) == 302)
+check(18, "…и новая оплата — 302", code(rpc(
+    "PerformTransaction", perform_params("1700000000003", 500000, "1000001"))) == 302)
 r = rpc("CheckTransaction", {"serviceId": 155, "transactionId": "1700000000002"}).json()
 check(18, "Проверка — проведена (1)", r["result"]["transactionState"] == 1)
 r = rpc("GetStatement", {"serviceId": 155, "dateFrom": now_local(-60), "dateTo": now_local(60)}).json()
@@ -279,6 +283,8 @@ check(18, "В выписке есть", any(x["transactionId"] == 1700000000002 
 r = rpc("CancelTransaction", {"serviceId": 155, "transactionId": "1700000000002"}).json()
 check(18, "Отмена — 2, повторная отмена — 202", r["result"]["transactionState"] == 2 and code(
     rpc("CancelTransaction", {"serviceId": 155, "transactionId": "1700000000002"})) == 202)
+check(18, "После отмены тестовый счёт снова открыт", (rpc("GetInformation", {
+    "serviceId": 155, "fields": {"order_id": "1000001"}}).json().get("result") or {}).get("status") == "0")
 s = SessionLocal()
 check(18, "Ни заказов, ни сообщений сотрудникам", s.query(Order).count() == orders_before
       and s.query(Notification).count() == notes_before)
@@ -286,7 +292,7 @@ s.close()
 from app import payments_report  # noqa: E402
 r = rpc("GetInformation", {"serviceId": 155, " fields ": {" order_id ": "1000001"}}).json()
 check(19, "Ключ « fields » с пробелами (как в TEST CASE Paynet) — понимаем",
-      (r.get("result") or {}).get("status") == 0, r)
+      (r.get("result") or {}).get("status") == "0", r)
 check(19, "…и несуществующий клиент по нему — 302",
       code(rpc("GetInformation", {"serviceId": 155, " fields ": {"order_id": "9999999"}})) == 302)
 payments.PAYNET_TEST = False

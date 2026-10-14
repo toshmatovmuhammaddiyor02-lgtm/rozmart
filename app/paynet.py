@@ -145,6 +145,20 @@ def order_number(params: dict) -> str:
     return number
 
 
+# Платежи у нас разовые: оплаченный счёт закрыт, повторно его не оплатить (302).
+# Тестовый счёт ведёт себя так же, но открывается снова после отмены платежа —
+# или через TEST_REOPEN, если прогон тестера оборвался до отмены
+TEST_REOPEN = timedelta(minutes=30)
+
+
+def test_account_closed(db: Session) -> bool:
+    return db.scalar(select(PaynetTransaction.id).where(
+        PaynetTransaction.order_number == TEST_NUMBER,
+        PaynetTransaction.state == SUCCESS,
+        PaynetTransaction.created_at > utcnow() - TEST_REOPEN,
+    ).limit(1)) is not None
+
+
 def is_test_account(number: str) -> bool:
     return bool(payments.PAYNET_TEST and TEST_ACCOUNT
                 and number in (ORDER_PREFIX + TEST_ACCOUNT, TEST_ACCOUNT.upper()))
@@ -196,7 +210,9 @@ def get_information(db: Session, params: dict) -> dict:
     check_service(params)
     number = order_number(params)
     if is_test_account(number):
-        return {"status": 0, "timestamp": stamp(), "fields": {
+        if test_account_closed(db):
+            raise err(302)
+        return {"status": "0", "timestamp": stamp(), "fields": {
             FIELD: TEST_ACCOUNT, "name": "Test P.", "amount": TEST_AMOUNT * payments.MINOR,
             "description": "ROZMART, тестовый счёт Paynet"}}
     order = find_order(db, number)
@@ -207,7 +223,8 @@ def get_information(db: Session, params: dict) -> dict:
         order.checkout_at = utcnow()
         db.commit()
     return {
-        "status": 0,
+        # строкой: так требует тестер Paynet (paynet-tester, 13.10.2026)
+        "status": "0",
         "timestamp": stamp(),
         "fields": {
             FIELD: order.number,
@@ -230,6 +247,8 @@ def perform(db: Session, params: dict, background: BackgroundTasks) -> dict:
 
     number = order_number(params)
     if is_test_account(number):
+        if test_account_closed(db):
+            raise err(302)
         if int(amount) != amount or int(amount) != TEST_AMOUNT * payments.MINOR:
             raise err(413)
         tx = PaynetTransaction(paynet_id=paynet_id, order_id=None, order_number=TEST_NUMBER,
