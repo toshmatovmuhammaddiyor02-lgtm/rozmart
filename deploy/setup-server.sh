@@ -21,6 +21,9 @@ set -euo pipefail
 APP_USER=rozmart
 APP_DIR=/opt/rozmart
 ENV_FILE=/etc/rozmart/env
+# Фото товаров, загруженные в панели и скачанные из REGOS. Вне каталога
+# приложения: выкладка кода его перезаписывает, а фото должны пережить её
+PHOTO_DIR=/var/lib/rozmart/img
 REPO="${REPO:-https://github.com/davronbekr016-del/rozmart.git}"
 DB_NAME=rozmart
 DB_USER=rozmart
@@ -81,6 +84,11 @@ python3 -m venv "$APP_DIR/.venv"
 
 chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 
+# фото товаров: на первом запуске — те, что пришли с кодом в static/img
+mkdir -p "$PHOTO_DIR"
+cp -n "$APP_DIR"/static/img/* "$PHOTO_DIR"/ 2>/dev/null || true
+chown -R "$APP_USER:$APP_USER" "$(dirname "$PHOTO_DIR")"
+
 # ---------------------------------------------------------------------------
 say "Настройки"
 mkdir -p "$(dirname "$ENV_FILE")"
@@ -113,6 +121,8 @@ NOTIFY_BOT_TOKEN=${NOTIFY_BOT_TOKEN:-}
 NOTIFY_WEBHOOK_SECRET=${NOTIFY_WEBHOOK_SECRET:-$(openssl rand -hex 24)}
 # Адрес сайта — по нему регистрируется вебхук (python -m scripts.setup_bot).
 PUBLIC_URL=${PUBLIC_URL:-}
+# Куда панель сохраняет фото товаров (см. PHOTO_DIR выше и nginx ниже).
+PHOTO_DIR=${PHOTO_DIR}
 EOF
   echo "создан $ENV_FILE"
 else
@@ -143,7 +153,7 @@ ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 NoNewPrivileges=true
-ReadWritePaths=${APP_DIR}
+ReadWritePaths=${APP_DIR} $(dirname ${PHOTO_DIR})
 
 [Install]
 WantedBy=multi-user.target
@@ -170,7 +180,7 @@ ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 NoNewPrivileges=true
-ReadWritePaths=${APP_DIR}
+ReadWritePaths=${APP_DIR} $(dirname ${PHOTO_DIR})
 EOF
 
 cat > /etc/systemd/system/rozmart-sync.timer <<EOF
@@ -209,6 +219,13 @@ server {
     # это временная конфигурация до появления домена.
 
     client_max_body_size 4m;
+
+    # фото товаров — из каталога фото, а не из кода (PHOTO_DIR)
+    location /static/img/ {
+        alias /var/lib/rozmart/img/;
+        expires 7d;
+        access_log off;
+    }
 
     location /static/ {
         alias /opt/rozmart/static/;
