@@ -206,15 +206,25 @@ def tx_id(params: dict) -> str:
 
 # ------------------------------------------------------------ методы
 
+# Одни и те же поля — в GetInformation и в ответе на оплату: так в примерах
+# Paynet, и их тестер отмечает, если в PerformTransaction полей меньше
+def order_fields(order: Order) -> dict:
+    return {FIELD: order.number, "name": masked_name(order.customer_name),
+            "amount": order.total * payments.MINOR,
+            "description": f"ROZMART, заказ {order.number}"}
+
+
+def test_fields() -> dict:
+    return {FIELD: TEST_ACCOUNT, "name": "Test P.", "amount": TEST_AMOUNT * payments.MINOR,
+            "description": "ROZMART, тестовый счёт Paynet"}
+
 def get_information(db: Session, params: dict) -> dict:
     check_service(params)
     number = order_number(params)
     if is_test_account(number):
         if test_account_closed(db):
             raise err(302)
-        return {"status": "0", "timestamp": stamp(), "fields": {
-            FIELD: TEST_ACCOUNT, "name": "Test P.", "amount": TEST_AMOUNT * payments.MINOR,
-            "description": "ROZMART, тестовый счёт Paynet"}}
+        return {"status": "0", "timestamp": stamp(), "fields": test_fields()}
     order = find_order(db, number)
     payable(order)
     # покупатель в Paynet смотрит на этот заказ: пока он платит, автоотмена
@@ -226,12 +236,7 @@ def get_information(db: Session, params: dict) -> dict:
         # строкой: так требует тестер Paynet (paynet-tester, 13.10.2026)
         "status": "0",
         "timestamp": stamp(),
-        "fields": {
-            FIELD: order.number,
-            "name": masked_name(order.customer_name),
-            "amount": order.total * payments.MINOR,
-            "description": f"ROZMART, заказ {order.number}",
-        },
+        "fields": order_fields(order),
     }
 
 
@@ -261,7 +266,7 @@ def perform(db: Session, params: dict, background: BackgroundTasks) -> dict:
             raise err(201)
         log.info("Paynet: тестовый платёж %s", paynet_id)
         return {"providerTrnId": tx.id, "timestamp": stamp(tx.created_at),
-                "fields": {FIELD: TEST_ACCOUNT}}
+                "fields": test_fields()}
 
     order = find_order(db, number)
     payable(order)
@@ -292,7 +297,7 @@ def perform(db: Session, params: dict, background: BackgroundTasks) -> dict:
     from app.shop_bot import send_onward
     send_onward(db, background, order)
     return {"providerTrnId": tx.id, "timestamp": stamp(tx.created_at),
-            "fields": {FIELD: order.number}}
+            "fields": order_fields(order)}
 
 
 def check(db: Session, params: dict) -> dict:
